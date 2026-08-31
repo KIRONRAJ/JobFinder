@@ -1,0 +1,131 @@
+/**
+ * Every icon in the app, mapped onto Lucide's thin-line set.
+ *
+ * Kept as an `Icon.*` object rather than importing Lucide directly at each call
+ * site: the names here are the app's vocabulary (Sparkle, Board, Chevron), not
+ * Lucide's, so swapping the underlying set again later stays a one-file change.
+ * Default sizes match what each call site was already passing.
+ */
+import {
+  ArrowRight,
+  Building2,
+  Calendar,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  ChevronsUpDown,
+  Circle,
+  CircleAlert,
+  Clock,
+  Columns3,
+  Copy,
+  Download,
+  ExternalLink,
+  FileText,
+  FolderClosed,
+  Gauge,
+  GraduationCap,
+  Handshake,
+  Image,
+  Inbox,
+  Shuffle,
+  LayoutGrid,
+  List,
+  LogOut,
+  Mail,
+  Map,
+  MessageSquare,
+  Menu,
+  Moon,
+  OctagonX,
+  Pencil,
+  Plus,
+  Search,
+  Send,
+  ShieldCheck,
+  Sparkles,
+  Square,
+  StickyNote,
+  Sun,
+  Target,
+  Terminal,
+  Trash2,
+  TriangleAlert,
+  Trophy,
+  User,
+  Volume2,
+  VolumeX,
+  X,
+  Zap,
+  ChartColumn,
+  CircleMinus,
+  type LucideIcon,
+} from 'lucide-react';
+
+interface Props {
+  className?: string;
+}
+
+/** Lucide defaults to 24px; the app sizes everything with Tailwind classes
+ *  instead, so size is neutralised and `className` stays in charge. */
+function make(C: LucideIcon, fallback: string) {
+  return ({ className = fallback }: Props) => (
+    <C className={className} size={undefined} strokeWidth={1.75} aria-hidden="true" />
+  );
+}
+
+export const Icon = {
+  Search: make(Search, 'w-4 h-4'),
+  Plus: make(Plus, 'w-4 h-4'),
+  Sun: make(Sun, 'w-4 h-4'),
+  Moon: make(Moon, 'w-4 h-4'),
+  Square: make(Square, 'w-4 h-4'),
+  Image: make(Image, 'w-4 h-4'),
+  Volume: make(Volume2, 'w-4 h-4'),
+  Mute: make(VolumeX, 'w-4 h-4'),
+  Shuffle: make(Shuffle, 'w-4 h-4'),
+  Folder: make(FolderClosed, 'w-3.5 h-3.5'),
+  External: make(ExternalLink, 'w-3.5 h-3.5'),
+  Sparkle: make(Sparkles, 'w-3 h-3'),
+  Clock: make(Clock, 'w-3 h-3'),
+  Calendar: make(Calendar, 'w-3 h-3'),
+  Paperplane: make(Send, 'w-4 h-4'),
+  Chat: make(MessageSquare, 'w-4 h-4'),
+  Trophy: make(Trophy, 'w-4 h-4'),
+  List: make(List, 'w-4 h-4'),
+  Board: make(Columns3, 'w-4 h-4'),
+  Trash: make(Trash2, 'w-4 h-4'),
+  Check: make(Check, 'w-3 h-3'),
+  Warning: make(CircleAlert, 'w-3 h-3'),
+  Close: make(X, 'w-4 h-4'),
+  Chart: make(ChartColumn, 'w-4 h-4'),
+  Arrow: make(ArrowRight, 'w-4 h-4'),
+  Terminal: make(Terminal, 'w-4 h-4'),
+  Download: make(Download, 'w-4 h-4'),
+  Mail: make(Mail, 'w-4 h-4'),
+  Sparkles: make(Sparkles, 'w-4 h-4'),
+  Chevron: make(ChevronDown, 'w-4 h-4'),
+  Sort: make(ChevronsUpDown, 'w-4 h-4'),
+  Withdrawn: make(CircleMinus, 'w-3 h-3'),
+  Zap: make(Zap, 'w-4 h-4'),
+  Gauge: make(Gauge, 'w-3.5 h-3.5'),
+  Target: make(Target, 'w-4 h-4'),
+  Shield: make(ShieldCheck, 'w-4 h-4'),
+  Map: make(Map, 'w-4 h-4'),
+  CheckCircle: make(CheckCircle2, 'w-3.5 h-3.5'),
+  Circle: make(Circle, 'w-3.5 h-3.5'),
+  Triangle: make(TriangleAlert, 'w-3.5 h-3.5'),
+  Octagon: make(OctagonX, 'w-3.5 h-3.5'),
+  Edit: make(Pencil, 'w-3.5 h-3.5'),
+  SignOut: make(LogOut, 'w-4 h-4'),
+  Building: make(Building2, 'w-4 h-4'),
+  Handshake: make(Handshake, 'w-4 h-4'),
+  Copy: make(Copy, 'w-3.5 h-3.5'),
+  Doc: make(FileText, 'w-3.5 h-3.5'),
+  GradCap: make(GraduationCap, 'w-3 h-3'),
+  Inbox: make(Inbox, 'w-8 h-8'),
+  Grid: make(LayoutGrid, 'w-4 h-4'),
+  Menu: make(Menu, 'w-5 h-5'),
+  User: make(User, 'w-3.5 h-3.5'),
+  Note: make(StickyNote, 'w-3.5 h-3.5'),
+};

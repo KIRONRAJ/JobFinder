@@ -1,0 +1,141 @@
+import { Icon } from './Icons';
+import { AtsScorePanel } from './AtsScorePanel';
+import type { Analysis } from '../types';
+
+/** Every group carries an icon and an explicit heading, so the four keyword
+ *  buckets never rely on chip colour alone to tell them apart. */
+function KeywordGroup({
+  title,
+  hint,
+  words,
+  tone,
+  icon: IconEl,
+}: {
+  title: string;
+  hint: string;
+  words: string[];
+  tone: 'good' | 'missing' | 'evidence' | 'warn';
+  icon: (p: { className?: string }) => JSX.Element;
+}) {
+  if (words.length === 0) return null;
+  const chipClass =
+    tone === 'good'
+      ? 'border-grass/40 text-grass'
+      : tone === 'warn'
+        ? 'border-rose/40 text-rose'
+        : tone === 'evidence'
+          ? 'border-amber/40 text-amber'
+          : 'border-line text-ink-soft';
+  return (
+    <div>
+      <p className="flex items-center gap-1.5 text-micro font-medium text-ink">
+        <IconEl className="h-3 w-3" />
+        {title}
+        <span className="font-normal text-ink-faint">· {hint}</span>
+      </p>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {words.map((w) => (
+          <span key={w} className={`chip ${chipClass}`}>
+            {w}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function AnalysisPanel({ analysis }: { analysis: Analysis }) {
+  const { ats, gap } = analysis;
+  const ran = new Date(analysis.at).toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+
+  return (
+    <div className="space-y-5">
+      {analysis.score && <AtsScorePanel score={analysis.score} />}
+
+      <div className="space-y-4">
+        <p className="text-micro uppercase tracking-wide text-ink-faint">ATS keywords</p>
+        <KeywordGroup
+          title="Matched"
+          hint="already evidenced on the CV"
+          words={ats.matched}
+          tone="good"
+          icon={Icon.Check}
+        />
+        <KeywordGroup
+          title="Missing"
+          hint="the ad asks, the CV doesn't say"
+          words={ats.missing}
+          tone="missing"
+          icon={Icon.Close}
+        />
+        <KeywordGroup
+          title="Evidence more strongly"
+          hint="true, but stated too weakly to score"
+          words={ats.toEvidence}
+          tone="evidence"
+          icon={Icon.Arrow}
+        />
+        <KeywordGroup
+          title="Unsupported — fix these"
+          hint="CV wording the evidence doesn't back"
+          words={ats.unsupported}
+          tone="warn"
+          icon={Icon.Warning}
+        />
+      </div>
+
+      <div className="border-t border-line-soft pt-4">
+        <p className="text-micro uppercase tracking-wide text-ink-faint">Gap analysis</p>
+
+        <div className="mt-3 grid gap-4 sm:grid-cols-2">
+          <div>
+            <p className="text-micro font-medium text-ink">They're asking for</p>
+            <ul className="mt-1.5 space-y-1">
+              {gap.theyWant.map((t) => (
+                <li key={t} className="text-meta text-ink-soft">
+                  · {t}
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <p className="text-micro font-medium text-ink">You actually have</p>
+            <ul className="mt-1.5 space-y-1">
+              {gap.youHave.map((t) => (
+                <li key={t} className="text-meta text-ink-soft">
+                  · {t}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+
+        {gap.positioning && (
+          <div className="mt-4 rounded-xl border border-line bg-panel-2 p-4">
+            <p className="text-micro font-medium text-ink">Honest positioning</p>
+            <p className="mt-1.5 text-meta leading-relaxed text-ink-soft">{gap.positioning}</p>
+          </div>
+        )}
+
+        {gap.learningTasks.length > 0 && (
+          <div className="mt-4">
+            <p className="text-micro font-medium text-ink">Worth learning</p>
+            <ul className="mt-1.5 space-y-1">
+              {gap.learningTasks.map((t) => (
+                <li key={t} className="text-meta text-ink-soft">
+                  · {t}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+
+      <p className="text-label text-ink-faint">Analysis run {ran} by Claude</p>
+    </div>
+  );
+}

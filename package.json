@@ -1,0 +1,40 @@
+{
+  "name": "job-search-hq",
+  "private": true,
+  "version": "3.7.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -n server,web -c cyan,magenta \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "node server/index.js",
+    "dev:web": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "check:data": "node scripts/check-data.mjs",
+    "check:type": "node scripts/check-type-scale.mjs"
+  },
+  "dependencies": {
+    "@fontsource-variable/outfit": "^5.3.0",
+    "@fontsource/jetbrains-mono": "^5.3.0",
+    "@gsap/react": "^2.1.2",
+    "cmdk": "^1.1.1",
+    "express": "^4.21.2",
+    "gsap": "^3.15.0",
+    "lucide-react": "^1.28.0",
+    "node-notifier": "^10.0.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.30.4",
+    "recharts": "^3.10.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.17",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^9.1.0",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5"
+  }
+}

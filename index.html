@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en-NZ">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Job Search HQ</title>
+    <script>
+      // Daily-rotating favicon: same emoji all day, changes at local midnight.
+      (function () {
+        var EMOJIS = ["💼", "🎯", "📌", "🚀", "🔍", "🧭", "📈", "🏆", "✅", "🗂️", "📋", "🔑"];
+        var today = new Date();
+        var seed = today.getFullYear() * 372 + today.getMonth() * 31 + today.getDate();
+        var emoji = EMOJIS[seed % EMOJIS.length];
+        var svg =
+          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">' +
+          '<text x="50" y="50" font-size="72" text-anchor="middle" dominant-baseline="central">' +
+          emoji +
+          "</text></svg>";
+        var link = document.createElement("link");
+        link.rel = "icon";
+        link.type = "image/svg+xml";
+        link.href = "data:image/svg+xml," + encodeURIComponent(svg);
+        document.head.appendChild(link);
+      })();
+    </script>
+  </head>
+  <body>
+    <!--
+      THESIS: A job search is a small number of live threads, each owing you a
+      next move. This surface shows the pipeline as calm, generous rows you can
+      read at a glance, and refuses the dense dashboard-of-widgets arrangement
+      that treats six applications like six thousand.
+      OWN-WORLD: Near-white (#FAFAFA) and near-black (#1D1D1F) surfaces, one
+      blue accent (#0071E3) reserved for action, hairline separators instead of
+      boxes, generous whitespace, 600-800 weight display type at large sizes,
+      status carried by small fixed-hue dots rather than filled chips.
+      STORY: Kironraj opens it, sees what's live and what's gone quiet, presses
+      one key to log a new role, and knows what he owes each application.
+      FIRST VIEWPORT: Oversized page title top-left, pipeline counts as four
+      large numerals beneath, then the application list — role at 17px
+      semibold, company muted beneath. Each row's primary verb (Applied /
+      Tracking) stays visible at rest because this is a daily-use Operate
+      surface; only the secondary CV action is hover-revealed. Primary action
+      (Add / Ctrl-K) sits top-right.
+      FORM: Apple-restrained, user-pinned direction (brief beats the roll).
+      FINISH: unreviewed and undocumented is unfinished; this build ends with
+      the finish review, the verdict, and DESIGN.md
+    -->
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
