@@ -8,13 +8,11 @@ import {
   LineChart,
   Pie,
   PieChart,
+  ReferenceLine,
   ResponsiveContainer,
-  Scatter,
-  ScatterChart,
   Tooltip,
   XAxis,
   YAxis,
-  ZAxis,
 } from 'recharts';
 import { useEffect, useRef } from 'react';
 import { gsap, useGSAP, prefersReducedMotion } from '../lib/gsapSetup';
@@ -36,26 +34,14 @@ import {
   responseTimeStats,
   responseTimeHistogram,
   ghostedApplications,
-  atsScoreOutcome,
-  SCORE_OUTCOME_LABEL,
   sourceFitMatrix,
   type ConversionRow,
 } from '../lib/outcomes';
-import { ROLE_TYPES, STATUSES, type Application, type Fit, type Status } from '../types';
+import { ROLE_TYPES, type Application, type Fit } from '../types';
 
 interface Props {
   apps: Application[];
 }
-
-const statusColors = (t: ChartTheme): Record<Status, string> => ({
-  researching: t.neutral,
-  applied: t.accent,
-  interview: t.amber,
-  offer: t.grass,
-  rejected: t.rose,
-  withdrawn: t.neutral,
-});
-
 const fitColors = (t: ChartTheme): Record<Fit, string> => ({
   strong: t.grass,
   good: t.accent,
@@ -69,12 +55,6 @@ function ChartCard({ title, children }: { title: string; children: React.ReactNo
       {children}
     </div>
   );
-}
-
-function monthKey(ms?: number) {
-  if (!ms) return null;
-  const d = new Date(ms);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
 function dayKey(ms: number) {
@@ -432,7 +412,6 @@ export function AnalyticsView({ apps }: Props) {
   }
 
   const animate = chartsShouldAnimate();
-  const STATUS_COLOR = statusColors(theme);
   const FIT_COLOR = fitColors(theme);
 
   const sourceRows = conversionBySource(apps);
@@ -440,24 +419,8 @@ export function AnalyticsView({ apps }: Props) {
   const atsRows = conversionByAtsScore(apps);
   const delayRows = conversionByApplyDelay(apps);
   const responseHistogram = responseTimeHistogram(apps);
-  // Small deterministic jitter so two apps that scored the same and landed
-  // the same outcome don't render as one indistinguishable dot.
-  const seenAt = new Map<string, number>();
-  const scorePoints = atsScoreOutcome(apps).map((p) => {
-    const key = `${p.score}|${p.outcome}`;
-    const n = seenAt.get(key) ?? 0;
-    seenAt.set(key, n + 1);
-    const jitter = n === 0 ? 0 : (((n + 1) >> 1) * (n % 2 === 0 ? 1 : -1)) * 0.12;
-    return { ...p, y: p.outcome + jitter };
-  });
   const matrix = sourceFitMatrix(apps);
   const matrixMax = Math.max(1, ...Array.from(matrix.counts.values()));
-
-  const statusData = STATUSES.map((s) => ({
-    label: s.label,
-    count: apps.filter((a) => a.status === s.key).length,
-    fill: STATUS_COLOR[s.key],
-  }));
 
   const fitKeys: Fit[] = ['strong', 'good', 'stretch'];
   const fitData = fitKeys
@@ -469,20 +432,85 @@ export function AnalyticsView({ apps }: Props) {
     count: apps.filter((a) => (a.type ?? 'Other') === t).length,
   })).filter((d) => d.count > 0);
 
-  const months = Array.from(
-    new Set(apps.map((a) => monthKey(a.created)).filter((m): m is string => !!m))
-  ).sort();
-  // Single month so far: group by day instead, so the trend still uses every application logged.
-  const bucketKey = months.length >= 2 ? monthKey : (ms?: number) => (ms ? dayKey(ms) : null);
+  // Always bucket by day, never by month — a month-level bucket collapses to
+  // as few as 2 points the moment activity spans a calendar boundary (e.g.
+  // 100+ apps in August, 2 in September), which renders as a flat, useless
+  // line even though the code isn't broken. Daily buckets stay meaningful at
+  // any data volume this tracker will ever reach.
   const buckets = Array.from(
-    new Set(apps.map((a) => bucketKey(a.created)).filter((b): b is string => !!b))
+    new Set(apps.filter((a) => a.created).map((a) => dayKey(a.created!)))
   ).sort();
   let running = 0;
   const overTimeData = buckets.map((b) => {
-    const created = apps.filter((a) => bucketKey(a.created) === b).length;
+    const created = apps.filter((a) => a.created && dayKey(a.created) === b).length;
     running += created;
     return { month: b, added: created, total: running };
   });
+
+  // Pipeline Conversion Funnel
+  const appliedCount = apps.filter((a) => a.status !== 'researching').length;
+  const respondedCount = apps.filter((a) => a.status === 'rejected' || a.status === 'interview' || a.status === 'offer').length;
+  const interviewCount = apps.filter((a) => a.status === 'interview' || a.status === 'offer').length;
+  const offerCount = apps.filter((a) => a.status === 'offer').length;
+
+  const funnelStages = [
+    {
+      stage: '1. Applied',
+      count: appliedCount,
+      rate: '100%',
+      desc: 'All submitted roles',
+      fill: theme.accent,
+    },
+    {
+      stage: '2. Response Received',
+      count: respondedCount,
+      rate: `${appliedCount ? Math.round((respondedCount / appliedCount) * 100) : 0}%`,
+      desc: 'Decision or contact received',
+      fill: theme.amber,
+    },
+    {
+      stage: '3. Interview Stage',
+      count: interviewCount,
+      rate: `${appliedCount ? ((interviewCount / appliedCount) * 100).toFixed(1) : 0}%`,
+      desc: 'Advanced to interview',
+      fill: '#8b5cf6',
+    },
+    {
+      stage: '4. Offer',
+      count: offerCount,
+      rate: `${appliedCount ? ((offerCount / appliedCount) * 100).toFixed(1) : 0}%`,
+      desc: 'Offer extended',
+      fill: theme.grass,
+    },
+  ];
+
+  // Weekly Momentum (Last 10 weeks)
+  const now = Date.now();
+  const ONE_WEEK_MS = 7 * 24 * 3600 * 1000;
+  const weeklyData: { week: string; count: number; target: number }[] = [];
+  let currentStreak = 0;
+  let streakActive = true;
+  for (let i = 9; i >= 0; i--) {
+    const end = now - i * ONE_WEEK_MS;
+    const start = end - ONE_WEEK_MS;
+    const count = apps.filter((a) => {
+      const t = a.created ?? (a.date ? Date.parse(a.date) : 0);
+      return t >= start && t < end;
+    }).length;
+    const startD = new Date(start);
+    weeklyData.push({
+      week: `${startD.getDate()} ${startD.toLocaleString('en-NZ', { month: 'short' })}`,
+      count,
+      target: 10,
+    });
+  }
+  for (let i = weeklyData.length - 1; i >= 0; i--) {
+    if (weeklyData[i].count > 0 && streakActive) {
+      currentStreak++;
+    } else {
+      streakActive = false;
+    }
+  }
 
   return (
     <div className="space-y-8">
@@ -520,26 +548,42 @@ export function AnalyticsView({ apps }: Props) {
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
       <ActivityHeatmap apps={apps} theme={theme} />
 
-      <ChartCard title="Pipeline funnel">
-        <ResponsiveContainer width="100%" height={220}>
-          <BarChart data={statusData} margin={{ left: -20 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke={theme.grid} vertical={false} />
-            <XAxis dataKey="label" tick={{ fontSize: 11, fill: theme.axis }} />
-            <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: theme.axis }} />
-            <Tooltip contentStyle={chartTooltipStyle(theme)} />
-            <Bar
-              dataKey="count"
-              radius={[4, 4, 0, 0]}
-              isAnimationActive={animate}
-              animationDuration={CHART_ANIM_DURATION}
-              animationEasing={CHART_ANIM_EASING}
-            >
-              {statusData.map((d) => (
-                <Cell key={d.label} fill={d.fill} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
+      <ChartCard title="Pipeline conversion funnel">
+        <div className="mb-3 flex items-center justify-between text-micro text-ink-soft">
+          <span>Stage-by-stage progression from Applied to Offer</span>
+          <span className="font-mono text-label text-accent font-semibold">{appliedCount} Total Submitted</span>
+        </div>
+        <div className="space-y-3 pt-1">
+          {funnelStages.map((stage) => {
+            const pct = appliedCount > 0 ? (stage.count / appliedCount) * 100 : 0;
+            return (
+              <div key={stage.stage} className="space-y-1">
+                <div className="flex items-center justify-between text-meta font-medium">
+                  <span className="flex items-center gap-2 text-ink">
+                    <span className="h-2.5 w-2.5 rounded-full" style={{ background: stage.fill }} />
+                    <span>{stage.stage}</span>
+                    <span className="text-micro font-normal text-ink-faint hidden sm:inline">({stage.desc})</span>
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono font-bold text-ink tabular-nums">{stage.count}</span>
+                    <span className="rounded border border-line bg-panel-2 px-1.5 py-0.5 text-micro font-mono font-semibold text-ink-soft">
+                      {stage.rate}
+                    </span>
+                  </div>
+                </div>
+                <div className="h-3 w-full overflow-hidden rounded-full bg-panel-2 border border-line-soft">
+                  <div
+                    className="h-full rounded-full transition-all duration-700 ease-out"
+                    style={{
+                      width: `${Math.max(3, pct)}%`,
+                      background: stage.fill,
+                    }}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </ChartCard>
 
       <ChartCard title="Applications over time">
@@ -551,7 +595,12 @@ export function AnalyticsView({ apps }: Props) {
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={overTimeData} margin={{ left: -20 }}>
               <CartesianGrid strokeDasharray="3 3" stroke={theme.grid} vertical={false} />
-              <XAxis dataKey="month" tick={{ fontSize: 11, fill: theme.axis }} />
+              <XAxis
+                dataKey="month"
+                tick={{ fontSize: 11, fill: theme.axis }}
+                interval="preserveStartEnd"
+                minTickGap={40}
+              />
               <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: theme.axis }} />
               <Tooltip contentStyle={chartTooltipStyle(theme)} />
               <Line
@@ -637,62 +686,38 @@ export function AnalyticsView({ apps }: Props) {
         )}
       </ChartCard>
 
-      <ChartCard title="Score vs. outcome">
-        {scorePoints.length < 1 ? (
-          <div className="flex h-[220px] items-center justify-center text-micro text-ink-soft">
-            No scored applications yet.
-          </div>
-        ) : (
-          <ResponsiveContainer width="100%" height={220}>
-            <ScatterChart margin={{ left: -20, bottom: 4 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke={theme.grid} />
-              <XAxis
-                type="number"
-                dataKey="score"
-                domain={[0, 100]}
-                tick={{ fontSize: 11, fill: theme.axis }}
-                label={{ value: 'ATS score', position: 'insideBottom', offset: -2, fontSize: 11, fill: theme.axis }}
-              />
-              <YAxis
-                type="number"
-                dataKey="y"
-                domain={[-0.5, 2.5]}
-                ticks={[0, 1, 2]}
-                tickFormatter={(v) => SCORE_OUTCOME_LABEL[Math.round(v) as 0 | 1 | 2] ?? ''}
-                tick={{ fontSize: 11, fill: theme.axis }}
-                width={90}
-              />
-              <ZAxis range={[70, 70]} />
-              <Tooltip
-                cursor={{ strokeDasharray: '3 3' }}
-                contentStyle={chartTooltipStyle(theme)}
-                formatter={(value, name) => (name === 'score' ? [value, 'ATS score'] : [value, name])}
-                labelFormatter={() => ''}
-                content={({ active, payload }) => {
-                  if (!active || !payload?.[0]) return null;
-                  const p = payload[0].payload as (typeof scorePoints)[number];
-                  return (
-                    <div style={chartTooltipStyle(theme)} className="px-2.5 py-1.5">
-                      <div className="text-micro font-medium text-ink">
-                        {p.company} — {p.role}
-                      </div>
-                      <div className="text-micro text-ink-soft">
-                        {p.score}/100 · {SCORE_OUTCOME_LABEL[p.outcome]}
-                      </div>
-                    </div>
-                  );
-                }}
-              />
-              <Scatter
-                data={scorePoints}
-                fill={theme.accent}
-                isAnimationActive={animate}
-                animationDuration={CHART_ANIM_DURATION}
-                animationEasing={CHART_ANIM_EASING}
-              />
-            </ScatterChart>
-          </ResponsiveContainer>
-        )}
+      <ChartCard title="Weekly application momentum">
+        <div className="mb-2 flex items-center justify-between text-micro text-ink-soft">
+          <span className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-accent" /> Submitted
+            <span className="ml-2 h-0.5 w-3 bg-amber inline-block border-t border-dashed border-amber" /> Goal: 10/wk
+          </span>
+          {currentStreak > 0 && (
+            <span className="rounded border border-amber/40 bg-amber/15 px-2 py-0.5 text-micro font-semibold text-amber">
+              🔥 {currentStreak} week active streak
+            </span>
+          )}
+        </div>
+        <ResponsiveContainer width="100%" height={220}>
+          <BarChart data={weeklyData} margin={{ left: -20, bottom: 4 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke={theme.grid} vertical={false} />
+            <XAxis dataKey="week" tick={{ fontSize: 11, fill: theme.axis }} />
+            <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: theme.axis }} />
+            <Tooltip
+              contentStyle={chartTooltipStyle(theme)}
+              formatter={(val) => [`${val} applications`, 'Volume']}
+            />
+            <ReferenceLine y={10} stroke={theme.amber} strokeDasharray="3 3" />
+            <Bar
+              dataKey="count"
+              fill={theme.accent}
+              radius={[4, 4, 0, 0]}
+              isAnimationActive={animate}
+              animationDuration={CHART_ANIM_DURATION}
+              animationEasing={CHART_ANIM_EASING}
+            />
+          </BarChart>
+        </ResponsiveContainer>
       </ChartCard>
       </div>
 

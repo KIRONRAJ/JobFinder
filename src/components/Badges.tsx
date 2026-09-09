@@ -401,3 +401,79 @@ export const PriorityTag = ({ app }: { app: Application }) => {
     </span>
   );
 };
+
+/**
+ * Renders an application tag. If tagged 'SOT' (or Summer of Tech), displays
+ * the official Summer of Tech kiwi-bird logo icon with distinct programme branding.
+ */
+export const TagBadge = ({
+  tag,
+  onClick,
+  onRemove,
+}: {
+  tag: string;
+  onClick?: (e: React.MouseEvent) => void;
+  onRemove?: () => void;
+}) => {
+  const isSot = tag.toUpperCase() === 'SOT' || tag.toLowerCase().includes('summer of tech');
+  if (isSot) {
+    return (
+      <span
+        onClick={onClick}
+        title="Summer of Tech (SOT)"
+        className={`inline-flex items-center gap-1.5 rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-xs font-semibold text-red-600 dark:text-red-400 ${
+          onClick ? 'cursor-pointer transition hover:bg-red-500/20' : ''
+        }`}
+      >
+        <img
+          src="/source-logos/sot.svg"
+          alt="SOT"
+          className="h-3.5 w-3.5 object-contain"
+          onError={(e) => {
+            (e.currentTarget as HTMLImageElement).src =
+              'https://app.summeroftech.co.nz/assets/sot/logo-f5694b7b.svg';
+          }}
+        />
+        <span>SOT</span>
+        {onRemove && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onRemove();
+            }}
+            className="ml-0.5 text-red-500 transition hover:text-red-800 dark:hover:text-red-200"
+            aria-label="Remove SOT tag"
+          >
+            ×
+          </button>
+        )}
+      </span>
+    );
+  }
+
+  return (
+    <span
+      onClick={onClick}
+      className={`chip text-ink-soft ${
+        onClick ? 'cursor-pointer transition hover:border-accent/40 hover:text-ink' : ''
+      }`}
+    >
+      <span>#{tag}</span>
+      {onRemove && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove();
+          }}
+          className="ml-1 text-ink-faint transition hover:text-ink"
+          aria-label={`Remove ${tag} tag`}
+        >
+          ×
+        </button>
+      )}
+    </span>
+  );
+};
+

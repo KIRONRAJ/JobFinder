@@ -18,7 +18,7 @@ export type RoleType =
   | 'Other';
 
 export type WorkArrangement = 'onsite' | 'hybrid' | 'remote';
-export type Source = 'Seek' | 'LinkedIn' | 'Trade Me Jobs' | 'Company site' | 'Other';
+export type Source = 'Seek' | 'LinkedIn' | 'Summer of Tech' | 'Trade Me Jobs' | 'Company site' | 'Other';
 
 export type ActivityKind =
   | 'created'
@@ -155,6 +155,15 @@ export interface AtsScore {
   explanation: string;
 }
 
+/** The structured shape a learning task sometimes takes — see the comment on
+ *  `Analysis.gap.learningTasks` for why this coexists with a plain string. */
+export interface LearningTask {
+  title: string;
+  reason?: string;
+  priority?: string;
+  proof?: string;
+}
+
 /**
  * Written by Claude on request, never computed in the app — see
  * "Career and Job/AI Providers.md". Purely local (except `score.overall`,
@@ -178,7 +187,12 @@ export interface Analysis {
     youHave: string[];
     /** An honest framing of the gap — never one that papers over it. */
     positioning: string;
-    learningTasks: string[];
+    /** Usually a plain string, but the "on-demand deep analysis" path (a
+     *  fuller ATS-score run) sometimes writes a richer structured shape
+     *  instead — both are real, valid data, not one legacy and one broken.
+     *  AnalysisPanel renders whichever shape shows up; never assume it's a
+     *  bare string without checking (see 4 Sep 2026 blank-page crash). */
+    learningTasks: (string | LearningTask)[];
   };
   /** Forced on every CV/cover-letter generation as of 6 Aug 2026 — absent only
    *  on analyses written before that date. */
@@ -309,6 +323,12 @@ export interface Application {
    * or Rejected/Withdrawn.
    */
   progressing?: boolean;
+
+  /**
+   * Freeform tags (e.g. 'SOT' for Summer of Tech, 'Internship', 'Graduate', 'Govt').
+   * Displayed as badges, used in filtering and search.
+   */
+  tags?: string[];
 }
 
 export type SortKey = 'updated' | 'created' | 'applied' | 'deadline' | 'company';
@@ -692,6 +712,13 @@ export interface EventItem {
   start: string;
   end: string;
   location?: string;
+  url?: string;
+  notes?: string;
+  badge?: string;
+  status?: string;
+  detailsUrl?: string;
+  roleUrl?: string;
+  roleLabel?: string;
 }
 
 export interface EventStore {
@@ -762,6 +789,7 @@ export const WORK_ARRANGEMENTS: { key: WorkArrangement; label: string }[] = [
 export const SOURCES: Source[] = [
   'Seek',
   'LinkedIn',
+  'Summer of Tech',
   'Trade Me Jobs',
   'Company site',
   'Other',

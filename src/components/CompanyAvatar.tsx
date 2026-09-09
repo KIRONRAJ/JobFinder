@@ -7,6 +7,10 @@ interface Props {
    *  initials monogram entirely (28 Aug 2026, on request) — otherwise falls
    *  back to the hash-based monogram below. */
   source?: string;
+  /** Optional tags on the application — if tagged SOT, displays the Summer of Tech logo. */
+  tags?: string[];
+  /** Optional explicit logo image path */
+  logo?: string;
   className?: string;
 }
 
@@ -16,23 +20,42 @@ interface Props {
 const SOURCE_LOGO: Record<string, string> = {
   Seek: '/source-logos/seek.png',
   LinkedIn: '/source-logos/linkedin.jpg',
+  'Summer of Tech': '/source-logos/sot.svg',
+  SOT: '/source-logos/sot.svg',
 };
 
 /** A small identity monogram per company — same treatment as Slack/Linear
- *  channel avatars. Purely local (hash-based), no company-logo fetch: the
- *  data model has no reliable company domain. */
-export function CompanyAvatar({ name, source, className = 'h-9 w-9 text-meta' }: Props) {
-  const logo = source ? SOURCE_LOGO[source] : undefined;
+ *  channel avatars. Replaced with platform/programme logo when source or tag is known. */
+export function CompanyAvatar({
+  name,
+  source,
+  tags,
+  logo: explicitLogo,
+  className = 'h-9 w-9 text-meta',
+}: Props) {
+  const isSot =
+    source === 'Summer of Tech' ||
+    source === 'SOT' ||
+    tags?.some((t) => t.toUpperCase() === 'SOT' || t.toLowerCase().includes('summer of tech'));
+
+  const logo =
+    explicitLogo ||
+    (isSot ? '/source-logos/sot.svg' : source ? SOURCE_LOGO[source] : undefined);
+
   if (logo) {
     return (
-      // Ring, not the logo itself, fixes dark-mode visibility: Seek's navy
-      // circle otherwise has no edge against a near-black panel. `--line`
-      // already flips to a light tone in dark mode (see index.css), so one
-      // border does it for any logo, not just this one.
       <img
         src={logo}
-        alt={`${source} listing`}
-        className={`shrink-0 rounded-full border border-line/60 object-cover ${className}`}
+        alt={isSot ? 'Summer of Tech listing' : `${source} listing`}
+        className={`shrink-0 rounded-full border border-line/60 ${
+          isSot ? 'bg-white p-1 object-contain' : 'object-cover'
+        } ${className}`}
+        onError={(e) => {
+          if (isSot) {
+            (e.currentTarget as HTMLImageElement).src =
+              'https://app.summeroftech.co.nz/assets/sot/logo-f5694b7b.svg';
+          }
+        }}
       />
     );
   }

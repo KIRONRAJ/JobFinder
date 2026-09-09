@@ -55,7 +55,7 @@ export const VIEW_META: {
    *  the sole carrier of what a nav item means. */
   emoji: string;
 }[] = [
-  { key: 'list', path: '/', label: 'All roles', group: 'Pipeline', icon: Icon.List, emoji: '📋' },
+  { key: 'list', path: '/', label: 'Pipeline', group: 'Pipeline', icon: Icon.Home, emoji: '🏠' },
   { key: 'agenda', path: '/agenda', label: 'Agenda', group: 'Pipeline', icon: Icon.Calendar, emoji: '🗓️' },
   { key: 'study', path: '/study', label: 'Study', group: 'Pipeline', icon: Icon.GradCap, emoji: '🎓' },
   { key: 'insights', path: '/insights', label: 'Insights', group: 'Pipeline', icon: Icon.Chart, emoji: '📊' },
@@ -100,6 +100,8 @@ interface Props {
   onSetTypeF: (t: string) => void;
   employmentF: string;
   onSetEmploymentF: (e: string) => void;
+  tagF?: string;
+  onSetTagF?: (t: string) => void;
   dark: boolean;
   onToggleDark: () => void;
   theme: 'bauhaus' | 'pulse';
@@ -126,6 +128,8 @@ export function Sidebar({
   onSetTypeF,
   employmentF,
   onSetEmploymentF,
+  tagF,
+  onSetTagF,
   dark,
   onToggleDark,
   theme,
@@ -153,7 +157,7 @@ export function Sidebar({
     <aside
       className={
         mode === 'rail'
-          ? 'hidden min-w-0 md:sticky md:top-0 md:block md:max-h-screen md:overflow-y-auto md:py-2'
+          ? 'hidden min-w-0 md:sticky md:top-[72px] md:block md:max-h-[calc(100vh-72px)] md:overflow-y-auto md:py-2'
           : 'min-w-0'
       }
     >
@@ -261,6 +265,24 @@ export function Sidebar({
               <option value="internship">Internships only</option>
             </select>
           </div>
+          {onSetTagF && (
+            <div className="relative">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs">🏷️</span>
+              <select
+                value={tagF ?? ''}
+                onChange={(e) => onSetTagF(e.target.value)}
+                className="field-input pl-8"
+                aria-label="Filter by tag"
+              >
+                <option value="">All tags</option>
+                <option value="SOT">🕊️ Summer of Tech (SOT)</option>
+                <option value="Internship">Internship</option>
+                <option value="Graduate">Graduate</option>
+                <option value="Cyber">Cyber</option>
+                <option value="Govt">Govt</option>
+              </select>
+            </div>
+          )}
         </div>
       )}
 

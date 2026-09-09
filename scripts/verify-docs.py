@@ -84,7 +84,7 @@ def docx_text(path):
 # The word target governs the letter, not the letterhead — counting the
 # contact block and date with it overstates by ~35 words and would fail a
 # letter that's actually in range.
-GREETING_RE = re.compile(r"^\s*(kia ora|dear|t[eē]n[aā] koe|hi )", re.I | re.M)
+GREETING_RE = re.compile(r"^\s*(kia ora|dear|t[eē]n[aā]\s*(?:koe|koutou)|hi\b)", re.I | re.M)
 
 
 def letter_body(text):
@@ -151,18 +151,36 @@ def is_literal_term(kw):
     return len(re.sub(r'\([^)]*\)', ' ', kw).split()) <= 2
 
 
-def find_docs(folder):
-    cv_pdf = cv_docx = cl_docx = None
+def find_docs(folder, role=None):
+    """Locate the CV/cover-letter pair in `folder`.
+
+    A company folder can hold more than one role's documents at once (two
+    roles logged at the same employer share `Pending to Apply/<Company>`
+    by convention). When more than one candidate matches a category, prefer
+    the one whose filename contains `role` (case-insensitive) rather than
+    silently taking whichever sorts last.
+    """
+    cv_pdfs, cv_docxs, cl_docxs = [], [], []
     for name in sorted(os.listdir(folder)):
         low = name.lower()
         full = os.path.join(folder, name)
         if low.startswith("cv - ") and low.endswith(".pdf"):
-            cv_pdf = full
+            cv_pdfs.append(full)
         elif low.startswith("cv - ") and low.endswith(".docx"):
-            cv_docx = full
+            cv_docxs.append(full)
         elif low.startswith("cover letter - ") and low.endswith(".docx"):
-            cl_docx = full
-    return cv_pdf, cv_docx, cl_docx
+            cl_docxs.append(full)
+
+    def pick(candidates):
+        if len(candidates) <= 1:
+            return candidates[0] if candidates else None
+        if role:
+            matches = [c for c in candidates if role.lower() in os.path.basename(c).lower()]
+            if len(matches) == 1:
+                return matches[0]
+        return candidates[-1]
+
+    return pick(cv_pdfs), pick(cv_docxs), pick(cl_docxs)
 
 
 def entry_for(match_key):
@@ -200,9 +218,9 @@ def check_pii(rep, label, text):
         rep.ok("%s PII scrub" % label)
 
 
-def verify(folder, keywords):
+def verify(folder, keywords, role=None):
     rep = Report()
-    cv_pdf, cv_docx, cl_docx = find_docs(folder)
+    cv_pdf, cv_docx, cl_docx = find_docs(folder, role)
 
     cv_text = ""
     if not cv_pdf:
@@ -289,12 +307,14 @@ def main():
 
     folder = args.folder
     keywords = []
+    role = None
     if args.match_key:
         entry = entry_for(args.match_key)
         if not entry:
             print("no entry matching %r" % args.match_key, file=sys.stderr)
             return 2
         folder = folder or entry.get("folderPath") or ""
+        role = entry.get("role")
         ats = (entry.get("analysis") or {}).get("ats") or {}
         keywords = list(ats.get("matched") or []) + list(ats.get("toEvidence") or [])
     if not folder:
@@ -305,7 +325,7 @@ def main():
         print("no such folder: %s" % folder, file=sys.stderr)
         return 2
 
-    rep = verify(folder, keywords)
+    rep = verify(folder, keywords, role)
     if args.json:
         print(json.dumps({"folder": folder, "pass": not rep.failed, "checks": rep.checks}, indent=2))
     else:

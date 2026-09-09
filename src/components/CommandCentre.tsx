@@ -133,12 +133,12 @@ export function CommandCentre({ apps, onOpen, onOpenTerminal, onAutoPicked }: Pr
           </div>
           <button onClick={onOpenTerminal} className="link-quiet">
             <Icon.Terminal className="h-3.5 w-3.5" />
-            Ask Claude
+            Terminal
           </button>
         </div>
         <p className="mt-2 text-meta text-ink-soft">
           Nothing owing right now, by deadline, follow-up, or readiness — genuinely nothing on
-          the whole pipeline needs today's attention. Ask Claude in chat (
+          the whole pipeline needs today's attention. Open Terminal (
           <kbd className="font-mono text-micro">Ctrl J</kbd>) if you want a judgement call instead
           of a rule-based one.
         </p>

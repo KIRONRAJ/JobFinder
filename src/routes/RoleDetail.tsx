@@ -23,13 +23,16 @@ import {
   SalaryTag,
   SourceTag,
   StatusPill,
+  TagBadge,
 } from '../components/Badges';
 import { WorkHoursTag } from '../components/WorkHoursTag';
 import { EditModal } from '../components/EditModal';
 import { ConfirmDelete } from '../components/ConfirmDelete';
+import { DocumentPreviewModal } from '../components/DocumentPreviewModal';
+import { TerminalPanel } from '../components/TerminalPanel';
 import { api } from '../api';
 import { useAppData } from '../state/AppDataProvider';
-import { computeReadiness } from '../lib/readiness';
+import { computeReadiness, isCvActuallyQueued, isCvActuallyDone } from '../lib/readiness';
 import { resolveEvidenceMap } from '../lib/evidenceState';
 import type { Application } from '../types';
 
@@ -50,15 +53,35 @@ export function RoleDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
+  // Pipeline filter (status/search/etc.) lives in the list page's URL query
+  // string, not app state — so "back to Pipeline" has to be an actual
+  // history pop, not a hardcoded link to "/", or it silently drops whatever
+  // tab/filter Kironraj was on. location.key === 'default' means this page
+  // was loaded directly (no prior entry in this session) — home is the only
+  // sane target then.
+  const backToPipeline = () => (location.key === 'default' ? navigate('/') : navigate(-1));
   const { apps, setApps, folders, refreshFolders, loading } = useAppData();
   const [editOpen, setEditOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [analysisBusy, setAnalysisBusy] = useState(false);
   const [cvBusy, setCvBusy] = useState(false);
   const [skipBusy, setSkipBusy] = useState(false);
   const [skipConfirming, setSkipConfirming] = useState(false);
   const [deleteLocalBusy, setDeleteLocalBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [terminalOpen, setTerminalOpen] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j') {
+        e.preventDefault();
+        setTerminalOpen(true);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
 
   const app = apps.find((a) => a.id === id);
 
@@ -94,10 +117,10 @@ export function RoleDetail() {
       <div className="mx-auto max-w-[720px] px-6 py-24 text-center sm:px-10">
         <Icon.Search className="mx-auto h-8 w-8 text-ink-faint" />
         <p className="mt-3 text-subhead text-ink-soft">No role found at this link.</p>
-        <Link to="/" className="link-quiet mt-4 justify-center">
+        <button onClick={backToPipeline} className="link-quiet mt-4 justify-center">
           <Icon.Arrow className="h-3.5 w-3.5 rotate-180" />
           Back to Pipeline
-        </Link>
+        </button>
       </div>
     );
   }
@@ -224,16 +247,70 @@ export function RoleDetail() {
   };
 
   return (
-    <div className="mx-auto max-w-[1400px] px-6 pb-24 pt-8 sm:px-10">
-      <Link to="/" className="link-quiet mb-6">
-        <Icon.Arrow className="h-3.5 w-3.5 rotate-180" />
-        Pipeline
-      </Link>
+    <div className="mx-auto max-w-[1400px] px-6 pb-24 pt-0 sm:px-10">
+      {/* Sticky Global Glassmorphic Brand Header */}
+      <header className="sticky top-3 z-40 mb-6 flex items-center justify-between gap-3 glass-header rounded-2xl sm:rounded-full px-4 sm:px-6 py-2.5 shadow-xl transition-all duration-300">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <Link
+            to="/"
+            className="group/brand flex items-center gap-2 focus:outline-none"
+            title="Job Search HQ — Return to Pipeline Home"
+            aria-label="Job Search HQ — Return to Pipeline Home"
+          >
+            <div className="flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full bg-accent transition-transform duration-200 group-hover/brand:scale-110 shadow-sm" />
+              <span className="h-2 w-2 rounded-[3px] bg-applied transition-transform duration-200 group-hover/brand:scale-110 shadow-sm" />
+              <span
+                className="h-2 w-2 bg-primary-yellow transition-transform duration-200 group-hover/brand:scale-110 shadow-sm"
+                style={{ clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)' }}
+              />
+            </div>
+            <span className="text-sm sm:text-base font-black uppercase tracking-tight text-ink group-hover/brand:text-accent transition-colors">
+              Job Search HQ
+            </span>
+            <span className="rounded-full border border-accent/25 bg-accent/10 px-1.5 py-0.2 text-[9px] font-bold uppercase tracking-wider text-accent font-mono">
+              Home
+            </span>
+          </Link>
+
+          <span className="text-ink-faint hidden sm:inline text-xs">/</span>
+
+          <span className="truncate text-xs sm:text-meta font-medium text-ink-soft max-w-[160px] sm:max-w-[340px]">
+            {app.company} · {app.role}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={backToPipeline}
+            className="btn-quiet h-8.5 sm:h-9 rounded-full px-2.5 sm:px-3 text-xs font-semibold gap-1.5"
+            title="Back to Pipeline"
+          >
+            <Icon.Arrow className="h-3 w-3 rotate-180" />
+            <span className="hidden sm:inline">Pipeline</span>
+          </button>
+
+          <button
+            onClick={() => setTerminalOpen(true)}
+            className="btn-quiet h-8.5 sm:h-9 rounded-full px-2.5 sm:px-3 text-xs font-semibold gap-1.5"
+            title="Terminal (Ctrl+J)"
+            aria-label="Terminal"
+          >
+            <Icon.Terminal className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Terminal</span>
+          </button>
+        </div>
+      </header>
 
       {/* Header */}
       <div className="mb-8 flex flex-wrap items-start justify-between gap-4 border-b border-line-soft pb-6">
         <div className="flex min-w-0 gap-4">
-          <CompanyAvatar name={app.company} source={app.source} className="mt-1 h-12 w-12 text-title" />
+          <CompanyAvatar
+            name={app.company}
+            source={app.source}
+            tags={app.tags}
+            className="mt-1 h-12 w-12 text-title"
+          />
           <div className="min-w-0">
             <h1
               className={`text-display font-semibold tracking-[-0.02em] ${app.status === 'rejected' ? 'text-ink-soft line-through decoration-2' : ''}`}
@@ -244,12 +321,29 @@ export function RoleDetail() {
               {app.company}
               {app.location ? ` · ${app.location}` : ''}
             </p>
+            {app.tags && app.tags.length > 0 && (
+              <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                {app.tags.map((t) => (
+                  <TagBadge key={t} tag={t} />
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
         <div className="flex shrink-0 flex-col items-end gap-2.5">
           <StatusPill status={app.status} />
           <div className="flex items-center gap-1.5">
+            {(folder?.cv || isCvActuallyDone(app, folder)) && (
+              <button
+                onClick={() => setPreviewOpen(true)}
+                className="btn-primary"
+                title="Preview generated CV and cover letter"
+              >
+                <Icon.Doc className="h-3.5 w-3.5" />
+                Preview CV
+              </button>
+            )}
             <button onClick={() => setEditOpen(true)} className="btn-ghost">
               <Icon.Edit className="h-3.5 w-3.5" />
               Edit
@@ -403,8 +497,8 @@ export function RoleDetail() {
                     onGenerateCv={handleGenerateCv}
                     onCancelCv={handleCancelCv}
                     cvBusy={cvBusy}
-                    cvQueued={app.cvStatus === 'queued'}
-                    cvDone={app.cvStatus === 'drafted' || app.cvStatus === 'sent'}
+                    cvQueued={isCvActuallyQueued(app, folder)}
+                    cvDone={isCvActuallyDone(app, folder)}
                     onSkip={handleSkipClick}
                     skipBusy={skipBusy}
                     skipConfirming={skipConfirming}
@@ -567,6 +661,20 @@ export function RoleDetail() {
         entry={confirming ? app : null}
         onCancel={() => setConfirming(false)}
         onConfirm={handleDelete}
+      />
+      <DocumentPreviewModal
+        open={previewOpen}
+        appId={app.id}
+        company={app.company}
+        role={app.role}
+        folderPath={app.folderPath}
+        onClose={() => setPreviewOpen(false)}
+        onRequestCv={handleGenerateCv}
+      />
+      <TerminalPanel
+        open={terminalOpen}
+        onClose={() => setTerminalOpen(false)}
+        onFinished={refreshFolders}
       />
     </div>
   );

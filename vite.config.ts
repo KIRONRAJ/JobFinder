@@ -19,4 +19,16 @@ export default defineConfig({
       '/api': `http://localhost:${process.env.API_PORT || 5178}`,
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-charts': ['recharts'],
+          'vendor-gsap': ['gsap', '@gsap/react'],
+          'vendor-icons': ['lucide-react'],
+        },
+      },
+    },
+  },
 });
