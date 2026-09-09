@@ -72,16 +72,16 @@ function conversionRows<K extends string>(
 }
 
 export function conversionBySource(apps: Application[]): ConversionRow<Source>[] {
-  return conversionRows(apps, (a) => a.source ?? null, (s) => s);
+  return conversionRows(apps, (a) => a.source || null, (s) => s);
 }
 
 export function conversionByFit(apps: Application[]): ConversionRow<Fit>[] {
   const FIT_LABEL: Record<Fit, string> = { strong: 'Strong fit', good: 'Good fit', stretch: 'Stretch' };
-  return conversionRows(apps, (a) => a.fit ?? null, (f) => FIT_LABEL[f]);
+  return conversionRows(apps, (a) => a.fit || null, (f) => FIT_LABEL[f]);
 }
 
 export function conversionByRoleType(apps: Application[]): ConversionRow<RoleType>[] {
-  return conversionRows(apps, (a) => a.type ?? null, (t) => t);
+  return conversionRows(apps, (a) => a.type || null, (t) => t);
 }
 
 /** Buckets on `analysis.score.overall` — the ATS protocol asserts an 80-point

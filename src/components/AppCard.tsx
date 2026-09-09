@@ -2,9 +2,9 @@ import { memo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Icon } from './Icons';
 import { CompanyAvatar } from './CompanyAvatar';
-import { FIT_TEXT, StatusPill, statusWash, STATUS_DOT } from './Badges';
+import { FIT_TEXT, StatusPill, statusWash, STATUS_DOT, TagBadge } from './Badges';
 import { ReadinessBar } from './ReadinessBar';
-import { computeReadiness } from '../lib/readiness';
+import { computeReadiness, isCvActuallyQueued, isCvActuallyDone } from '../lib/readiness';
 import { rowSignals } from '../lib/rowSignals';
 import type { Application, FolderStatus } from '../types';
 
@@ -18,15 +18,17 @@ interface Props {
   onRequestReview: () => void;
   onOpenFolder: () => void;
   onMarkApplied: () => void;
+  onPreviewDocs?: () => void;
+  onSelectTag?: (tag: string) => void;
   /** True while the local Claude CLI has an active run — lets a queued card
    *  say "Processing…" instead of a generic "Queued…" while it's actually
    *  happening right now (as opposed to just sitting in the request queue). */
   claudeRunning?: boolean;
 }
 
-function cvLabel(cvStatus?: string, claudeRunning?: boolean) {
-  if (cvStatus === 'queued') return claudeRunning ? 'Processing…' : 'Queued — click to cancel';
-  if (cvStatus === 'drafted' || cvStatus === 'sent') return 'Re-queue CV';
+function cvLabel(queued: boolean, done: boolean, claudeRunning?: boolean) {
+  if (queued) return claudeRunning ? 'Processing…' : 'Queued — click to cancel';
+  if (done) return 'Re-queue CV';
   return 'Create CV';
 }
 
@@ -47,12 +49,14 @@ function AppCardImpl({
   onRequestReview,
   onOpenFolder,
   onMarkApplied,
+  onPreviewDocs,
+  onSelectTag,
   claudeRunning,
 }: Props) {
   const navigate = useNavigate();
-  const queued = app.cvStatus === 'queued';
+  const queued = isCvActuallyQueued(app, folder);
   // Only offer a review once there's something drafted to review.
-  const hasDrafts = app.cvStatus === 'drafted' || app.cvStatus === 'sent';
+  const hasDrafts = isCvActuallyDone(app, folder);
   const reviewQueued = app.reviewStatus === 'queued';
   const canMarkApplied = app.status === 'researching';
   const isApplied = app.status === 'applied';
@@ -65,7 +69,7 @@ function AppCardImpl({
   // Ranked, capped at 3 with a quiet "+N" for the rest — this is the fix for
   // the row that used to render 13 chips unconditionally. Most rows in the
   // real data show zero or one; a chip here means something is actually owed.
-  const signals = rowSignals(app);
+  const signals = rowSignals(app, folder);
   const shown = signals.slice(0, 3);
   const overflow = signals.length - shown.length;
 
@@ -118,7 +122,12 @@ function AppCardImpl({
               className="mt-0.5 inline-block transition-transform duration-200 [transition-timing-function:cubic-bezier(0.34,1.56,0.64,1)]
                          hover:scale-[1.12] hover:-rotate-6 active:scale-[0.92] active:rotate-0"
             >
-              <CompanyAvatar name={app.company} source={app.source} className="h-9 w-9 text-meta" />
+              <CompanyAvatar
+                name={app.company}
+                source={app.source}
+                tags={app.tags}
+                className="h-9 w-9 text-meta"
+              />
             </span>
             <div className="min-w-0 flex-1">
               <h3
@@ -143,6 +152,25 @@ function AppCardImpl({
                 {' · '}
                 {FIT_TEXT[app.fit]}
               </p>
+
+              {app.tags && app.tags.length > 0 && (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  {app.tags.map((t) => (
+                    <TagBadge
+                      key={t}
+                      tag={t}
+                      onClick={
+                        onSelectTag
+                          ? (e) => {
+                              e.stopPropagation();
+                              onSelectTag(t);
+                            }
+                          : undefined
+                      }
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
@@ -175,6 +203,17 @@ function AppCardImpl({
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1.5">
+          {hasDrafts && onPreviewDocs && (
+            <button
+              type="button"
+              onClick={stop(onPreviewDocs)}
+              title="Preview tailored CV & Cover Letter in browser (PDF viewer & direct download)"
+              className="inline-flex items-center gap-1.5 rounded-full border-2 border-line bg-panel-2/80 px-2.5 py-0.5 text-label font-medium text-ink transition hover:border-accent hover:text-accent shadow-hardXs"
+            >
+              <Icon.Doc className="h-3.5 w-3.5 text-accent" />
+              <span>Preview CV</span>
+            </button>
+          )}
           {app.folderPath && (
             <button
               onClick={stop(onOpenFolder)}
@@ -246,7 +285,7 @@ function AppCardImpl({
                 else if (!queued) onRequestCv();
               })}
               disabled={queued && claudeRunning}
-              title={cvLabel(app.cvStatus, claudeRunning)}
+              title={cvLabel(queued, hasDrafts, claudeRunning)}
               className={`btn-ghost opacity-100 transition [@media(hover:hover)]:opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 ${queued ? 'border-amber/40 text-amber' : ''} ${queued && claudeRunning ? 'cursor-default' : ''}`}
             >
               {queued ? (
@@ -254,7 +293,7 @@ function AppCardImpl({
               ) : (
                 <Icon.Sparkle className="h-3.5 w-3.5" />
               )}
-              {cvLabel(app.cvStatus, claudeRunning)}
+              {cvLabel(queued, hasDrafts, claudeRunning)}
             </button>
             {hasDrafts && (
               <button

@@ -17,6 +17,11 @@ interface Props {
   /** Mirrors the internal `running` flag outward so a card can show
    *  "Processing…" instead of a generic "Queued…" while a run is live. */
   onRunningChange?: (running: boolean) => void;
+  /** Bumped by the homescreen "Gmail" button to auto-start a gmailfetch run
+   *  the moment the panel opens — a plain counter rather than a boolean so
+   *  a second press while the panel is already open still fires (a boolean
+   *  flip back to the same value wouldn't re-trigger the effect below). */
+  gmailFetchSignal?: number;
 }
 
 interface Progress {
@@ -59,13 +64,22 @@ function isHttpUrl(text: string): boolean {
  * of the on-demand loop described in the jobhq skill, for when Kironraj wants
  * it processed now instead of waiting until he's next in chat.
  */
-export function TerminalPanel({ open, onClose, onFinished, onRunningChange }: Props) {
+export function TerminalPanel({
+  open,
+  onClose,
+  onFinished,
+  onRunningChange,
+  gmailFetchSignal,
+}: Props) {
   const [input, setInput] = useState('');
   const [lines, setLines] = useState<Line[]>([]);
   const [running, setRunning] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingRequest[]>([]);
+  const [provider, setProvider] = useState<'claude' | 'gemini'>(() =>
+    localStorage.getItem('ai_provider') === 'gemini' ? 'gemini' : 'claude'
+  );
   const [mode, setMode] = useState<'analyse' | 'command' | 'pending' | null>(null);
   const [progress, setProgress] = useState<Progress | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -78,6 +92,11 @@ export function TerminalPanel({ open, onClose, onFinished, onRunningChange }: Pr
   useEffect(() => {
     onRunningChange?.(running);
   }, [running, onRunningChange]);
+
+  const changeProvider = (next: 'claude' | 'gemini') => {
+    setProvider(next);
+    localStorage.setItem('ai_provider', next);
+  };
 
   const refreshPending = useCallback(() => {
     api
@@ -126,7 +145,7 @@ export function TerminalPanel({ open, onClose, onFinished, onRunningChange }: Pr
     try {
       const res = await start();
       const body = await res.json();
-      if (!res.ok) throw new Error(body.error || 'Could not start Claude.');
+      if (!res.ok) throw new Error(body.error || 'Could not start the run.');
 
       runIdRef.current = body.runId;
       const source = new EventSource(`/api/claude/stream/${body.runId}`);
@@ -158,7 +177,7 @@ export function TerminalPanel({ open, onClose, onFinished, onRunningChange }: Pr
         source.close();
         sourceRef.current = null;
         setRunning(false);
-        setError('Lost connection to the Claude process.');
+        setError('Lost connection to the process.');
         playSound('error');
       };
     } catch (err) {
@@ -176,7 +195,7 @@ export function TerminalPanel({ open, onClose, onFinished, onRunningChange }: Pr
         fetch('/api/claude/run', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ jobUrl: value }),
+          body: JSON.stringify({ jobUrl: value, provider }),
         })
       );
     }
@@ -184,7 +203,7 @@ export function TerminalPanel({ open, onClose, onFinished, onRunningChange }: Pr
       fetch('/api/claude/command', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: value }),
+        body: JSON.stringify({ text: value, provider }),
       })
     );
   };
@@ -193,8 +212,36 @@ export function TerminalPanel({ open, onClose, onFinished, onRunningChange }: Pr
     // Seed the bar at 0/N immediately from what we already know, before the
     // first `PROGRESS` line arrives to confirm/advance it.
     beginRun('pending', { done: 0, total: pending.length }, () =>
-      fetch('/api/claude/process-requests', { method: 'POST' })
+      fetch('/api/claude/process-requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider }),
+      })
     );
+
+  const runGmailFetch = () =>
+    beginRun('command', null, () =>
+      fetch('/api/claude/gmailfetch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ count: 10, provider }),
+      })
+    );
+
+  // The homescreen Gmail button opens this panel and bumps the signal in the
+  // same click — this effect is what actually starts the run once the panel
+  // has mounted. Skipped while a run is already in flight so a second press
+  // (or the panel briefly reopening) can't stack two spawns. `runGmailFetch`
+  // is deliberately left out of the dependency array (it's a plain function,
+  // recreated every render like `send`/`processPending` above) — the signal
+  // comparison against the ref is what actually gates re-firing, not deps.
+  const lastGmailSignal = useRef(gmailFetchSignal);
+  useEffect(() => {
+    if (gmailFetchSignal === undefined || gmailFetchSignal === lastGmailSignal.current) return;
+    lastGmailSignal.current = gmailFetchSignal;
+    if (!running) runGmailFetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gmailFetchSignal, running]);
 
   const stop = async () => {
     if (!runIdRef.current) return;
@@ -223,8 +270,19 @@ export function TerminalPanel({ open, onClose, onFinished, onRunningChange }: Pr
               <div className="flex items-center gap-2.5">
                 <Icon.Terminal className="h-4 w-4 text-ink-soft" />
                 <span id="terminal-title" className="text-body font-semibold">
-                  Claude
+                  Terminal
                 </span>
+                <select
+                  value={provider}
+                  onChange={(e) => changeProvider(e.target.value as 'claude' | 'gemini')}
+                  disabled={running}
+                  aria-label="AI provider"
+                  className="rounded-full border border-line bg-panel-2 px-2.5 py-1 text-micro font-medium
+                             text-ink-soft disabled:opacity-50"
+                >
+                  <option value="claude">Claude</option>
+                  <option value="gemini">Gemini</option>
+                </select>
                 {running && (
                   <span className="flex items-center gap-1.5 text-micro text-amber">
                     <span className="dot animate-pulse bg-amber" />

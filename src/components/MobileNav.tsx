@@ -21,6 +21,8 @@ interface Props {
   onSetTypeF: (t: string) => void;
   employmentF: string;
   onSetEmploymentF: (e: string) => void;
+  tagF?: string;
+  onSetTagF?: (t: string) => void;
   dark: boolean;
   onToggleDark: () => void;
   theme: 'bauhaus' | 'pulse';

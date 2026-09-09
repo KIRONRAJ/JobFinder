@@ -1,6 +1,6 @@
 import { Icon } from './Icons';
 import { AtsScorePanel } from './AtsScorePanel';
-import type { Analysis } from '../types';
+import type { Analysis, LearningTask } from '../types';
 
 /** Every group carries an icon and an explicit heading, so the four keyword
  *  buckets never rely on chip colour alone to tell them apart. */
@@ -41,6 +41,23 @@ function KeywordGroup({
         ))}
       </div>
     </div>
+  );
+}
+
+/** The richer `{title, reason, priority, proof}` shape a learning task can
+ *  take — see the type comment for why the plain-string shape isn't the only
+ *  one. `reason`/`priority`/`proof` are all optional, so this degrades to
+ *  just the title if that's all a given task carries. */
+function LearningTaskItem({ task }: { task: LearningTask }) {
+  return (
+    <li className="text-meta text-ink-soft">
+      <span className="text-ink">· {task.title}</span>
+      {task.priority && <span className="ml-1.5 chip border-line text-micro">{task.priority}</span>}
+      {task.reason && <div className="ml-3 mt-0.5 text-label text-ink-faint">{task.reason}</div>}
+      {task.proof && (
+        <div className="ml-3 mt-0.5 text-label italic text-ink-faint">Proof: {task.proof}</div>
+      )}
+    </li>
   );
 }
 
@@ -124,12 +141,16 @@ export function AnalysisPanel({ analysis }: { analysis: Analysis }) {
         {gap.learningTasks.length > 0 && (
           <div className="mt-4">
             <p className="text-micro font-medium text-ink">Worth learning</p>
-            <ul className="mt-1.5 space-y-1">
-              {gap.learningTasks.map((t) => (
-                <li key={t} className="text-meta text-ink-soft">
-                  · {t}
-                </li>
-              ))}
+            <ul className="mt-1.5 space-y-1.5">
+              {gap.learningTasks.map((t, i) =>
+                typeof t === 'string' ? (
+                  <li key={i} className="text-meta text-ink-soft">
+                    · {t}
+                  </li>
+                ) : (
+                  <LearningTaskItem key={i} task={t} />
+                )
+              )}
             </ul>
           </div>
         )}

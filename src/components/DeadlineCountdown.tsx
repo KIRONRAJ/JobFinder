@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { gsap, useGSAP, prefersReducedMotion } from '../lib/gsapSetup';
 import { Icon } from './Icons';
 import { useDismissed } from '../lib/dismissed';
 import type { Application, ApplicationTask } from '../types';
@@ -7,27 +8,6 @@ interface Props {
   apps: Application[];
   onOpen: (app: Application) => void;
 }
-
-/**
- * The task banner above the list.
- *
- * This used to be a hardcoded countdown to one date constant (the NZ Police
- * Sova assessment, 17 Aug 2026 23:59 AEST). That design had two faults, and
- * both bit on the same day: it couldn't know the assessment had actually been
- * sat, so it kept counting down after the work was done, and the only way to
- * correct it was to edit the component.
- *
- * It now reads `entry.tasks` instead. Two rules make it useful rather than
- * decorative:
- *
- *  - It shows only things Kironraj still has to DO. An ad's closing `deadline`
- *    is deliberately NOT eligible — every outstanding closing date in the
- *    tracker belongs to a role already applied to, so counting down to one is
- *    noise dressed up as urgency.
- *  - A task that's been completed shows a short, calm acknowledgement instead
- *    of vanishing instantly, then retires itself after DONE_VISIBLE_MS. Going
- *    straight to nothing reads like the app lost the thing you just did.
- */
 
 const DONE_VISIBLE_MS = 72 * 3_600_000;
 const URGENT_MS = 24 * 3_600_000;
@@ -39,21 +19,12 @@ interface Resolved {
   completedMs: number | null;
 }
 
-/**
- * `ApplicationTask.completedAt` is typed as an ISO string, but these entries are
- * written by hand-rolled scripts that bypass the type system, and one wrote an
- * epoch number instead (the ARG assessment, 20 Aug 2026). `Date.parse` returns
- * NaN for that, so a finished task read as outstanding and the banner kept
- * nagging about work already done. Accept both rather than trusting the type.
- */
 function parseWhen(value: string | number | undefined): number | null {
   if (value == null) return null;
   const ms = typeof value === 'number' ? value : Date.parse(value);
   return Number.isNaN(ms) ? null : ms;
 }
 
-/** What a dismissal is *about* — this exact task, not "the countdown banner",
- *  so a new task still gets to interrupt after this one is dismissed. */
 export const taskBannerId = (appId: string, taskId: string) => `task:${appId}:${taskId}`;
 
 function splitRemaining(ms: number) {
@@ -68,8 +39,6 @@ function splitRemaining(ms: number) {
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
-/** Outstanding work first, soonest due; if there is none, the most recently
- *  completed task, so the banner can acknowledge it before retiring. */
 function pickTask(apps: Application[], now: number, isDismissed: (id: string) => boolean): Resolved | null {
   const all: Resolved[] = [];
 
@@ -77,7 +46,7 @@ function pickTask(apps: Application[], now: number, isDismissed: (id: string) =>
     if (app.status === 'rejected' || app.status === 'withdrawn') continue;
     for (const task of app.tasks ?? []) {
       const dueMs = Date.parse(task.dueAt);
-      if (Number.isNaN(dueMs)) continue; // a malformed date shouldn't blank the banner
+      if (Number.isNaN(dueMs)) continue;
       if (isDismissed(taskBannerId(app.id, task.id))) continue;
       const parsedDone = parseWhen(task.completedAt);
       all.push({
@@ -103,16 +72,31 @@ function pickTask(apps: Application[], now: number, isDismissed: (id: string) =>
 export function DeadlineCountdown({ apps, onOpen }: Props) {
   const [now, setNow] = useState(() => Date.now());
   const { isDismissed, dismiss } = useDismissed();
+  const bannerRef = useRef<HTMLDivElement>(null);
   const resolved = pickTask(apps, now, isDismissed);
   const live = resolved !== null && resolved.completedMs === null;
 
-  // Only tick for a live countdown. A completed banner shows a fixed date, so
-  // re-rendering it every second would be pure waste.
   useEffect(() => {
     if (!live) return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, [live]);
+
+  useGSAP(
+    () => {
+      if (!bannerRef.current) return;
+      const reduce = prefersReducedMotion();
+      if (!reduce) {
+        gsap.from(bannerRef.current, {
+          y: -10,
+          opacity: 0,
+          duration: 0.35,
+          ease: 'back.out(1.8)',
+        });
+      }
+    },
+    { scope: bannerRef, dependencies: [resolved?.task.id] }
+  );
 
   if (!resolved) return null;
 
@@ -121,16 +105,18 @@ export function DeadlineCountdown({ apps, onOpen }: Props) {
   if (completedMs !== null) {
     return (
       <BannerShell
+        containerRef={bannerRef}
         app={app}
         onOpen={onOpen}
         onDismiss={() => dismiss(taskBannerId(app.id, task.id))}
-        tone="border-grass/40 bg-grass/[0.06]"
-        icon={<Icon.CheckCircle className="h-3.5 w-3.5" />}
-        accent="text-grass"
+        badge="Task Completed"
+        badgeStyle="border-grass/30 bg-grass/10 text-grass"
+        tone="border-line bg-panel shadow-hardSm hover:shadow-hardMd"
+        icon={<Icon.CheckCircle className="h-4 w-4 text-grass" />}
         label={`${task.label} — submitted`}
         trailing={
-          <span className="text-micro text-ink-soft">
-            {new Date(completedMs).toLocaleString('en-NZ', {
+          <span className="rounded border border-line-soft bg-panel-2 px-2.5 py-1 text-micro font-mono text-ink-soft">
+            Done {new Date(completedMs).toLocaleString('en-NZ', {
               day: 'numeric',
               month: 'short',
               hour: 'numeric',
@@ -147,34 +133,65 @@ export function DeadlineCountdown({ apps, onOpen }: Props) {
   const expired = remainingMs <= 0;
   const { days, hours, minutes, seconds } = splitRemaining(remainingMs);
   const urgent = !expired && remainingMs <= URGENT_MS;
+  const critical = !expired && remainingMs <= 6 * 3_600_000;
 
   return (
     <BannerShell
+      containerRef={bannerRef}
       app={app}
       onOpen={onOpen}
       onDismiss={() => dismiss(taskBannerId(app.id, task.id))}
-      tone={
+      badge={expired ? 'Overdue' : critical ? 'Critical Deadline' : urgent ? 'Urgent Deadline' : 'Upcoming Task'}
+      badgeStyle={
         expired
-          ? 'border-rose/40 bg-rose/[0.06]'
-          : urgent
-            ? 'border-rose/40 bg-rose/[0.06]'
-            : 'border-amber/40 bg-amber/[0.06]'
+          ? 'border-rose/30 bg-rose/10 text-rose'
+          : critical
+            ? 'border-rose/30 bg-rose/15 text-rose animate-pulse'
+            : urgent
+              ? 'border-amber/30 bg-amber/15 text-amber'
+              : 'border-accent/30 bg-accent/10 text-accent'
       }
-      icon={expired ? <Icon.Triangle className="h-3.5 w-3.5" /> : <Icon.Clock className="h-3.5 w-3.5" />}
-      accent={expired || urgent ? 'text-rose' : 'text-amber'}
-      label={expired ? `${task.label} — window closed, not marked done` : task.label}
+      tone="border-line bg-panel shadow-hardSm hover:shadow-hardMd"
+      icon={
+        expired ? (
+          <Icon.Triangle className="h-4 w-4 text-rose" />
+        ) : (
+          <Icon.Clock className={`h-4 w-4 ${critical ? 'text-rose animate-pulse' : urgent ? 'text-amber' : 'text-accent'}`} />
+        )
+      }
+      label={expired ? `${task.label} (Window passed)` : task.label}
       trailing={
         expired ? (
-          <span className="text-micro text-rose">
+          <span className="rounded border border-rose/30 bg-rose/10 px-2 py-1 text-micro font-mono text-rose">
             Due {new Date(dueMs).toLocaleString('en-NZ', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}
           </span>
         ) : (
-          <span className="flex items-center gap-1 font-mono text-meta tabular-nums text-ink">
-            {days > 0 && <span>{days}d</span>}
-            <span>{pad(hours)}h</span>
-            <span>{pad(minutes)}m</span>
-            <span>{pad(seconds)}s</span>
-          </span>
+          <div className="flex items-center gap-1 font-mono text-micro tabular-nums">
+            {days > 0 && (
+              <span className="rounded border border-line bg-panel-2 px-1.5 py-0.5 font-semibold text-ink shadow-hardXs">
+                {days}<span className="ml-0.5 text-[10px] text-ink-faint">d</span>
+              </span>
+            )}
+            <span className="rounded border border-line bg-panel-2 px-1.5 py-0.5 font-semibold text-ink shadow-hardXs">
+              {pad(hours)}<span className="ml-0.5 text-[10px] text-ink-faint">h</span>
+            </span>
+            <span className="font-bold text-ink-faint">:</span>
+            <span className="rounded border border-line bg-panel-2 px-1.5 py-0.5 font-semibold text-ink shadow-hardXs">
+              {pad(minutes)}<span className="ml-0.5 text-[10px] text-ink-faint">m</span>
+            </span>
+            <span className="font-bold text-ink-faint">:</span>
+            <span
+              className={`rounded border px-1.5 py-0.5 font-semibold shadow-hardXs ${
+                critical
+                  ? 'border-rose bg-rose/10 text-rose animate-pulse'
+                  : urgent
+                    ? 'border-amber bg-amber/10 text-amber'
+                    : 'border-accent/40 bg-accent/10 text-accent'
+              }`}
+            >
+              {pad(seconds)}<span className="ml-0.5 text-[10px] opacity-70">s</span>
+            </span>
+          </div>
         )
       }
       note={task.note}
@@ -183,57 +200,71 @@ export function DeadlineCountdown({ apps, onOpen }: Props) {
 }
 
 function BannerShell({
+  containerRef,
   app,
   onOpen,
   onDismiss,
+  badge,
+  badgeStyle,
   tone,
   icon,
-  accent,
   label,
   trailing,
   note,
 }: {
+  containerRef?: React.Ref<HTMLDivElement>;
   app: Application;
   onOpen: (app: Application) => void;
   onDismiss: () => void;
+  badge: string;
+  badgeStyle: string;
   tone: string;
   icon: JSX.Element;
-  accent: string;
   label: string;
   trailing: JSX.Element;
   note?: string;
 }) {
-  // The shell is a div, not a button: the dismiss control has to be a real
-  // button and nesting one inside another is invalid HTML (and breaks the
-  // click target in practice). The open action gets its own button instead.
   return (
-    <div className={`mb-4 flex items-center gap-2 rounded-2xl border px-4 py-2.5 transition ${tone}`}>
-      <button
-        onClick={() => onOpen(app)}
-        title={note}
-        className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1.5 text-left
-                   focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-accent/30
-                   rounded-lg hover:brightness-[1.03]"
-      >
-        <span className={`flex items-center gap-1.5 text-micro font-medium ${accent}`}>
+    <div
+      ref={containerRef}
+      className={`mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md border-2 p-3.5 transition-all ${tone}`}
+    >
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2.5">
+        <span
+          className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${badgeStyle}`}
+        >
           {icon}
-          {label}
+          {badge}
         </span>
-        <span className="text-ink-soft">
-          <span className="text-ink">{app.role}</span>
-          <span className="text-ink-faint"> · {app.company}</span>
-        </span>
-        <span className="ml-auto">{trailing}</span>
-      </button>
-      <button
-        onClick={onDismiss}
-        title="Dismiss this banner"
-        aria-label={`Dismiss ${label}`}
-        className="shrink-0 rounded-lg p-1 text-ink-faint transition hover:bg-ink/10 hover:text-ink
-                   focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-accent/30"
-      >
-        <Icon.Close className="h-3.5 w-3.5" />
-      </button>
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 text-meta font-medium">
+          <span className="truncate text-ink">{label}</span>
+          <span className="truncate text-ink-soft">
+            <span className="text-ink-faint">for</span> {app.role}{' '}
+            <span className="text-ink-faint">· {app.company}</span>
+          </span>
+        </div>
+      </div>
+
+      <div className="flex shrink-0 items-center gap-2">
+        {trailing}
+        <button
+          type="button"
+          onClick={() => onOpen(app)}
+          title={note || 'Open application'}
+          className="btn-quiet rounded px-2 py-1 text-micro text-accent hover:bg-accent/10 transition"
+        >
+          View Role ➔
+        </button>
+        <button
+          type="button"
+          onClick={onDismiss}
+          title="Dismiss banner"
+          aria-label={`Dismiss ${label}`}
+          className="rounded p-1 text-ink-faint transition hover:bg-ink/10 hover:text-ink"
+        >
+          <Icon.Close className="h-3.5 w-3.5" />
+        </button>
+      </div>
     </div>
   );
 }

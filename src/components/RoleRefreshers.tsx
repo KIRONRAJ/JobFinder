@@ -432,7 +432,12 @@ function RoleCard({
     <section className="panel px-5 py-4">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3">
-          <CompanyAvatar name={app.company} source={app.source} className="h-9 w-9 shrink-0 text-meta" />
+          <CompanyAvatar
+            name={app.company}
+            source={app.source}
+            tags={app.tags}
+            className="h-9 w-9 shrink-0 text-meta"
+          />
           <div className="min-w-0">
             <h3 className="truncate text-subhead font-medium text-ink">{app.role}</h3>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-micro text-ink-soft">

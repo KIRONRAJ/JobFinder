@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { gsap, useGSAP, prefersReducedMotion } from './lib/gsapSetup';
 import { useFlipList } from './lib/useFlipList';
 import { playSound, setSoundEnabled, type SoundKind } from './lib/sound';
@@ -25,7 +25,7 @@ import {
 import { Icon } from './components/Icons';
 import { Pipeline } from './components/Pipeline';
 import { AppCard } from './components/AppCard';
-import { BoardView } from './components/BoardView';
+import { TagBadge } from './components/Badges';
 import { EditModal } from './components/EditModal';
 import { AppliedModal } from './components/AppliedModal';
 import { ConfirmDelete } from './components/ConfirmDelete';
@@ -39,19 +39,50 @@ import { CommandCentre } from './components/CommandCentre';
 import { InterviewBanner } from './components/InterviewBanner';
 import { EventsBanner } from './components/EventsBanner';
 import { LoginGate } from './components/LoginGate';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { PageHeader } from './components/PageHeader';
 import { OutreachView } from './components/OutreachView';
 import { Celebration } from './components/Celebration';
 import { Wallpaper } from './components/Wallpaper';
 import { AgendaView } from './components/AgendaView';
 import { DeadlineCountdown } from './components/DeadlineCountdown';
-import { SkeletonRows } from './components/SkeletonRows';
+import { SkeletonRows, SkeletonPanels } from './components/SkeletonRows';
 import { AppDataProvider, useAppData } from './state/AppDataProvider';
 import { LegacyViewRedirect } from './routes/LegacyViewRedirect';
-import { RoleDetail } from './routes/RoleDetail';
-import { Insights } from './routes/Insights';
-import { Study } from './routes/Study';
 import { pathToView, viewToPath } from './routes/viewRoutes';
+
+// Lazy-loaded routes with auto-retry on stale chunk deployment (v5.1.5)
+function lazyWithRetry<T extends React.ComponentType<any>>(
+  factory: () => Promise<{ default: T }>
+) {
+  return lazy(async () => {
+    const hasRefreshed = sessionStorage.getItem('chunk_load_retried') === 'true';
+    try {
+      const mod = await factory();
+      sessionStorage.removeItem('chunk_load_retried');
+      return mod;
+    } catch (err: any) {
+      const isChunkError =
+        err?.message?.includes('dynamically imported module') ||
+        err?.message?.includes('Failed to fetch') ||
+        err?.name === 'TypeError';
+      if (!hasRefreshed && isChunkError) {
+        sessionStorage.setItem('chunk_load_retried', 'true');
+        window.location.reload();
+        return new Promise<{ default: T }>(() => {});
+      }
+      throw err;
+    }
+  });
+}
+
+const RoleDetail = lazyWithRetry(() => import('./routes/RoleDetail').then((m) => ({ default: m.RoleDetail })));
+const Insights = lazyWithRetry(() => import('./routes/Insights').then((m) => ({ default: m.Insights })));
+const Study = lazyWithRetry(() => import('./routes/Study').then((m) => ({ default: m.Study })));
+const BoardView = lazyWithRetry(() => import('./components/BoardView').then((m) => ({ default: m.BoardView })));
+const DenseTableView = lazyWithRetry(() => import('./components/DenseTableView').then((m) => ({ default: m.DenseTableView })));
+const DocumentPreviewModal = lazyWithRetry(() => import('./components/DocumentPreviewModal').then((m) => ({ default: m.DocumentPreviewModal })));
+const InterviewTransitionModal = lazyWithRetry(() => import('./components/InterviewTransitionModal').then((m) => ({ default: m.InterviewTransitionModal })));
 
 function Dashboard() {
   const {
@@ -128,6 +159,7 @@ function Dashboard() {
   const statusF = searchParams.get('status') ?? '';
   const typeF = searchParams.get('type') ?? '';
   const employmentF = searchParams.get('employment') ?? '';
+  const tagF = searchParams.get('tag') ?? '';
 
   const setParam = useCallback(
     (key: string, value: string) => {
@@ -147,11 +179,24 @@ function Dashboard() {
   const setStatusF = (v: string) => setParam('status', v);
   const setTypeF = (v: string) => setParam('type', v);
   const setEmploymentF = (v: string) => setParam('employment', v);
+  const setTagF = (v: string) => setParam('tag', v);
 
-  // Board used to be its own `view`; it's now a layout mode on 'list' instead
-  // — same drag-to-status columns, one fewer nav item to compete for space.
-  const layout = searchParams.get('layout') === 'board' ? 'board' : 'rows';
-  const setLayout = (v: 'rows' | 'board') => setParam('layout', v === 'board' ? 'board' : '');
+  const sotCount = useMemo(
+    () =>
+      apps.filter(
+        (a) =>
+          a.tags?.some((t) => t.toUpperCase() === 'SOT') ||
+          a.source === 'Summer of Tech'
+      ).length,
+    [apps]
+  );
+
+  // Layout mode (v5.0): 'rows' (Card view), 'table' (Dense table view), or 'board' (Kanban)
+  const layoutParam = searchParams.get('layout');
+  const layout: 'rows' | 'table' | 'board' =
+    layoutParam === 'board' ? 'board' : layoutParam === 'table' ? 'table' : 'rows';
+  const setLayout = (v: 'rows' | 'table' | 'board') =>
+    setParam('layout', v === 'rows' ? '' : v);
 
   // Sort is a preference, not navigation — the URL can carry it (so a
   // shared/bookmarked link keeps its ordering), but the default when the URL
@@ -169,7 +214,16 @@ function Dashboard() {
   const [editing, setEditing] = useState<Application | null>(null);
   const [confirming, setConfirming] = useState<Application | null>(null);
   const [applying, setApplying] = useState<Application | null>(null);
+  const [previewingApp, setPreviewingApp] = useState<Application | null>(null);
+  const [interviewingApp, setInterviewingApp] = useState<Application | null>(null);
   const [terminalOpen, setTerminalOpen] = useState(false);
+  // Bumped by the homescreen Gmail button; TerminalPanel watches this to
+  // auto-start a gmailfetch run the moment it opens — see its own comment.
+  const [gmailFetchSignal, setGmailFetchSignal] = useState(0);
+  const handleGmailFetch = () => {
+    setTerminalOpen(true);
+    setGmailFetchSignal((n) => n + 1);
+  };
 
   const [toasts, setToasts] = useState<ToastMsg[]>([]);
   const [alertQueue, setAlertQueue] = useState<string[]>([]);
@@ -348,6 +402,10 @@ function Dashboard() {
   };
 
   const handleStatusChange = async (app: Application, status: Status) => {
+    if (status === 'interview') {
+      setInterviewingApp(app);
+      return;
+    }
     // Optimistic: the card snaps to the new column immediately, then
     // reconciles with whatever the server actually stored.
     setApps((list) => list.map((a) => (a.id === app.id ? { ...a, status } : a)));
@@ -357,6 +415,25 @@ function Dashboard() {
     } catch (err) {
       setApps((list) => list.map((a) => (a.id === app.id ? app : a)));
       toast(err instanceof Error ? err.message : String(err), 'error');
+    }
+  };
+
+  const handleInterviewConfirm = async (patch: Partial<Application>, options?: { requestPrep?: boolean }) => {
+    if (!interviewingApp) return;
+    const entry = interviewingApp;
+    try {
+      const updated = await api.update(entry.id, patch);
+      setApps((list) => list.map((a) => (a.id === updated.id ? updated : a)));
+      toast(`Marked interview — ${entry.company}!`, 'info', 'milestone');
+      if (options?.requestPrep) {
+        try {
+          await api.requestCv(entry.id);
+        } catch {}
+      }
+    } catch (err) {
+      toast(err instanceof Error ? err.message : String(err), 'error');
+    } finally {
+      setInterviewingApp(null);
     }
   };
 
@@ -396,7 +473,11 @@ function Dashboard() {
     return apps
       .filter((a) => {
         const matchesSearch =
-          !q || a.company.toLowerCase().includes(q) || a.role.toLowerCase().includes(q);
+          !q ||
+          a.company.toLowerCase().includes(q) ||
+          a.role.toLowerCase().includes(q) ||
+          (a.tags && a.tags.some((t) => t.toLowerCase().includes(q))) ||
+          (a.source && a.source.toLowerCase().includes(q));
         // The board's columns already separate by status, so applying the
         // status filter there too would just blank out columns confusingly.
         // Keep this in sync with Pipeline's own TABS matchers — "applied" and
@@ -412,10 +493,15 @@ function Dashboard() {
               : a.status === statusF);
         const matchesType = !typeF || a.type === typeF;
         const matchesEmployment = !employmentF || (a.employment ?? 'job') === employmentF;
-        return matchesSearch && matchesStatus && matchesType && matchesEmployment;
+        const matchesTag =
+          !tagF ||
+          (tagF.toUpperCase() === 'SOT'
+            ? a.tags?.some((t) => t.toUpperCase() === 'SOT') || a.source === 'Summer of Tech'
+            : a.tags && a.tags.some((t) => t.toLowerCase() === tagF.toLowerCase()));
+        return matchesSearch && matchesStatus && matchesType && matchesEmployment && matchesTag;
       })
       .sort(sorters[sort]);
-  }, [apps, search, statusF, typeF, employmentF, layout, sort]);
+  }, [apps, search, statusF, typeF, employmentF, tagF, layout, sort]);
 
   useFlipList(cardListRef, filtered);
 
@@ -453,7 +539,13 @@ function Dashboard() {
         outreach={outreach}
         pendingCount={pendingCount}
         onOpenTerminal={() => setTerminalOpen(true)}
+        onGmailFetch={handleGmailFetch}
         onPrimary={isOutreachView(view) ? () => setOutreachAddOpen(true) : openNew}
+        onHome={() => {
+          setView('list');
+          navigate('/');
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
       />
 
       <Sidebar
@@ -465,6 +557,8 @@ function Dashboard() {
         onSetTypeF={setTypeF}
         employmentF={employmentF}
         onSetEmploymentF={setEmploymentF}
+        tagF={tagF}
+        onSetTagF={setTagF}
         dark={dark}
         onToggleDark={() => setDark((d) => !d)}
         theme={theme}
@@ -486,6 +580,8 @@ function Dashboard() {
         onSetTypeF={setTypeF}
         employmentF={employmentF}
         onSetEmploymentF={setEmploymentF}
+        tagF={tagF}
+        onSetTagF={setTagF}
         dark={dark}
         onToggleDark={() => setDark((d) => !d)}
         theme={theme}
@@ -525,6 +621,9 @@ function Dashboard() {
               setEditing(a);
               setEditOpen(true);
             }}
+            onSchedule={(a) => {
+              setInterviewingApp(a);
+            }}
           />
           <EventsBanner />
           <CommandCentre
@@ -547,33 +646,69 @@ function Dashboard() {
           <Pipeline apps={apps} active={statusF} onPick={setStatusF} />
 
           {layout !== 'board' && (
-            <div className="relative mb-2">
-              <Icon.Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-faint" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search company or role…"
-                className="field-input pl-10"
-              />
+            <div className="mb-3 flex flex-wrap items-center gap-2.5">
+              <div className="relative min-w-[220px] flex-1">
+                <Icon.Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-faint" />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search company, role, or tag (e.g. SOT)…"
+                  className="field-input pl-10"
+                />
+              </div>
+
+              {sotCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setTagF(tagF.toUpperCase() === 'SOT' ? '' : 'SOT')}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold shadow-sm transition ${
+                    tagF.toUpperCase() === 'SOT'
+                      ? 'border-red-500 bg-red-500 text-white'
+                      : 'border-red-500/30 bg-red-500/10 text-red-600 hover:bg-red-500/20 dark:text-red-400'
+                  }`}
+                  title="Filter by Summer of Tech (SOT) roles"
+                >
+                  <img
+                    src="/source-logos/sot.svg"
+                    alt=""
+                    className="h-3.5 w-3.5 object-contain"
+                  />
+                  <span>Summer of Tech ({sotCount})</span>
+                </button>
+              )}
+
+              {tagF && tagF.toUpperCase() !== 'SOT' && (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-meta text-ink-soft">Tag:</span>
+                  <TagBadge tag={tagF} onRemove={() => setTagF('')} />
+                </div>
+              )}
             </div>
           )}
 
           <div className="mb-6 flex flex-wrap items-center justify-between gap-3 text-micro text-ink-faint">
             <span>
               Showing {filtered.length} of {apps.length}
-              {statusF && ' · filtered'}
+              {(statusF || tagF) && ' · filtered'}
             </span>
             <div className="flex items-center gap-4">
-              {/* Layout toggle — Board used to be its own nav item; the drag-
-                  to-status columns are unchanged, they're just reached here now. */}
+              {/* Layout toggle (v5.0): Cards, Table, Board */}
               <div className="flex items-center gap-0.5 rounded-full border border-line p-0.5">
                 <button
                   onClick={() => setLayout('rows')}
-                  aria-pressed={layout !== 'board'}
-                  title="Row view"
-                  className={`rounded-full p-1.5 transition ${layout !== 'board' ? 'bg-panel-2 text-ink' : 'text-ink-faint hover:text-ink'}`}
+                  aria-pressed={layout === 'rows'}
+                  title="Card view"
+                  className={`rounded-full p-1.5 transition ${layout === 'rows' ? 'bg-panel-2 text-ink' : 'text-ink-faint hover:text-ink'}`}
                 >
                   <Icon.List className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  onClick={() => setLayout('table')}
+                  aria-pressed={layout === 'table'}
+                  title="Dense table view"
+                  className={`rounded-full p-1.5 transition ${layout === 'table' ? 'bg-panel-2 text-ink' : 'text-ink-faint hover:text-ink'}`}
+                >
+                  <Icon.Grid className="h-3.5 w-3.5" />
                 </button>
                 <button
                   onClick={() => setLayout('board')}
@@ -625,9 +760,13 @@ function Dashboard() {
       ) : loading ? (
         <SkeletonRows />
       ) : view === 'insights' ? (
-        <Insights apps={apps} onOpenTerminal={() => setTerminalOpen(true)} />
+        <Suspense fallback={<SkeletonPanels />}>
+          <Insights apps={apps} onOpenTerminal={() => setTerminalOpen(true)} />
+        </Suspense>
       ) : view === 'study' ? (
-        <Study apps={apps} onOpenTerminal={() => setTerminalOpen(true)} />
+        <Suspense fallback={<SkeletonPanels />}>
+          <Study apps={apps} onOpenTerminal={() => setTerminalOpen(true)} />
+        </Suspense>
       ) : view === 'agenda' ? (
         <AgendaView
           apps={apps}
@@ -657,14 +796,31 @@ function Dashboard() {
           )}
         </div>
       ) : layout === 'board' ? (
-        <BoardView
-          apps={filtered}
-          onEdit={(a) => {
-            setEditing(a);
-            setEditOpen(true);
-          }}
-          onStatusChange={handleStatusChange}
-        />
+        <Suspense fallback={<SkeletonRows />}>
+          <BoardView
+            apps={filtered}
+            onEdit={(a) => {
+              setEditing(a);
+              setEditOpen(true);
+            }}
+            onStatusChange={handleStatusChange}
+          />
+        </Suspense>
+      ) : layout === 'table' ? (
+        <Suspense fallback={<SkeletonRows />}>
+          <DenseTableView
+            apps={filtered}
+            folders={folders}
+            onEdit={(a) => {
+              setEditing(a);
+              setEditOpen(true);
+            }}
+            onPreviewDocs={(a) => setPreviewingApp(a)}
+            onRequestCv={handleRequestCv}
+            onMarkApplied={(a) => setApplying(a)}
+            onSelectTag={setTagF}
+          />
+        </Suspense>
       ) : (
         <div
           ref={listRef}
@@ -703,6 +859,8 @@ function Dashboard() {
                   onRequestReview={() => handleRequestReview(a)}
                   onOpenFolder={() => handleOpenFolder(a)}
                   onMarkApplied={() => setApplying(a)}
+                  onPreviewDocs={() => setPreviewingApp(a)}
+                  onSelectTag={setTagF}
                   claudeRunning={claudeRunning}
                 />
               ))}
@@ -716,7 +874,7 @@ function Dashboard() {
         <span className="mx-2">·</span>
         <kbd className="font-mono">Ctrl K</kbd> commands
         <span className="mx-2">·</span>
-        <kbd className="font-mono">Ctrl J</kbd> Claude
+        <kbd className="font-mono">Ctrl J</kbd> Terminal
       </footer>
       </main>
 
@@ -753,10 +911,36 @@ function Dashboard() {
         onClose={() => setTerminalOpen(false)}
         onFinished={refresh}
         onRunningChange={setClaudeRunning}
+        gmailFetchSignal={gmailFetchSignal}
       />
 
       <Toaster toasts={toasts} />
       <Celebration celebration={celebration} />
+
+      {previewingApp && (
+        <Suspense fallback={null}>
+          <DocumentPreviewModal
+            open={Boolean(previewingApp)}
+            appId={previewingApp.id}
+            company={previewingApp.company}
+            role={previewingApp.role}
+            folderPath={previewingApp.folderPath}
+            onClose={() => setPreviewingApp(null)}
+            onRequestCv={() => handleRequestCv(previewingApp)}
+          />
+        </Suspense>
+      )}
+
+      {interviewingApp && (
+        <Suspense fallback={null}>
+          <InterviewTransitionModal
+            open={Boolean(interviewingApp)}
+            entry={interviewingApp}
+            onClose={() => setInterviewingApp(null)}
+            onConfirm={handleInterviewConfirm}
+          />
+        </Suspense>
+      )}
 
       <CommandPalette
         apps={apps}
@@ -796,7 +980,12 @@ const RETIRED_REDIRECTS: { from: string; to: string }[] = [
 ];
 
 function AppRoutes() {
+  // Keyed by pathname so navigating to a different page remounts the
+  // boundary and clears any caught error automatically — a crash on one
+  // role's page shouldn't leave every subsequent page stuck on the fallback.
+  const location = useLocation();
   return (
+    <ErrorBoundary key={location.pathname}>
     <Routes>
       {VIEW_META.map((v) => (
         <Route key={v.path} path={v.path} element={<Dashboard />} />
@@ -807,9 +996,17 @@ function AppRoutes() {
       {/* Additive: a role's own page, reachable by URL and (for now) a link
           inside the still-working AppCard expander. Doesn't replace anything
           the routes above already do. */}
-      <Route path="/role/:id" element={<RoleDetail />} />
+      <Route
+        path="/role/:id"
+        element={
+          <Suspense fallback={<div className="mx-auto max-w-[1400px] px-6 pb-24 pt-8 sm:px-10"><SkeletonPanels /></div>}>
+            <RoleDetail />
+          </Suspense>
+        }
+      />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </ErrorBoundary>
   );
 }
 

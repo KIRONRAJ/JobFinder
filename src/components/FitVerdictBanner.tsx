@@ -75,8 +75,9 @@ export function FitVerdictBanner({
   onCancelCv: () => void;
   cvBusy: boolean;
   cvQueued: boolean;
-  /** True once `cvStatus` is 'drafted' or 'sent' — a CV/cover letter already
-   *  exists for this entry, so the primary action becomes a re-queue rather
+  /** True once a CV/cover letter genuinely exists for this entry (see
+   *  `isCvActuallyDone` — `cvStatus`, or real files on disk if `cvStatus`
+   *  never caught up), so the primary action becomes a re-queue rather
    *  than a first generate. */
   cvDone: boolean;
   /** First click arms the confirm, second click (within RoleDetail's own
@@ -99,7 +100,7 @@ export function FitVerdictBanner({
   userFacts: string;
   onSaveFacts: (facts: string) => Promise<void>;
 }) {
-  const meta = VERDICT_META[recommendation.verdict];
+  const meta = VERDICT_META[recommendation.verdict] ?? VERDICT_META.borderline;
   const VerdictIcon = meta.icon;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(userFacts);

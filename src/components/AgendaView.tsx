@@ -26,6 +26,8 @@ interface AgendaItem {
    *  without re-parsing a composite key back apart. */
   entryId: string;
   source: 'app' | 'outreach';
+  appSource?: string;
+  tags?: string[];
   date: string;
   kind: Kind;
   title: string;
@@ -74,6 +76,8 @@ function buildAgenda(apps: Application[], outreach: OutreachEntry[]): AgendaItem
         id: `${a.id}-deadline`,
         entryId: a.id,
         source: 'app',
+        appSource: a.source,
+        tags: a.tags,
         date: a.deadline,
         kind: 'deadline',
         title: a.role,
@@ -86,6 +90,8 @@ function buildAgenda(apps: Application[], outreach: OutreachEntry[]): AgendaItem
         id: `${a.id}-followup`,
         entryId: a.id,
         source: 'app',
+        appSource: a.source,
+        tags: a.tags,
         date: a.followUpDue,
         kind: 'followup',
         title: a.role,
@@ -99,6 +105,8 @@ function buildAgenda(apps: Application[], outreach: OutreachEntry[]): AgendaItem
         id: `${a.id}-nextaction`,
         entryId: a.id,
         source: 'app',
+        appSource: a.source,
+        tags: a.tags,
         date: a.nextActionDue,
         kind: 'nextaction',
         title: a.role,
@@ -114,6 +122,8 @@ function buildAgenda(apps: Application[], outreach: OutreachEntry[]): AgendaItem
           id: `${a.id}-interview`,
           entryId: a.id,
           source: 'app',
+          appSource: a.source,
+          tags: a.tags,
           date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
           kind: 'interview',
           title: a.role,
@@ -133,6 +143,8 @@ function buildAgenda(apps: Application[], outreach: OutreachEntry[]): AgendaItem
         id: `${a.id}-task-${task.id}`,
         entryId: a.id,
         source: 'app',
+        appSource: a.source,
+        tags: a.tags,
         date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
         kind: 'task',
         title: a.role,
@@ -265,7 +277,12 @@ function AgendaRow({
                   ${bordered ? 'border-t border-line-soft' : ''}`}
     >
       <div className="flex items-center gap-3">
-        <CompanyAvatar name={it.company} className="h-8 w-8 text-micro" />
+        <CompanyAvatar
+          name={it.company}
+          source={it.appSource}
+          tags={it.tags}
+          className="h-8 w-8 text-micro"
+        />
         <div className="min-w-0 flex-1">
           <div className="truncate text-body font-medium">{it.title}</div>
           <div className="truncate text-micro text-ink-soft">{it.company}</div>

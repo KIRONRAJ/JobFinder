@@ -38,8 +38,8 @@ export function MarketView({ apps, onOpenTerminal }: Props) {
           The market map builds from ATS analyses. Ask Claude to run one on any logged role.
         </p>
         <button onClick={onOpenTerminal} className="btn-quiet mt-4 px-4 py-2 text-micro">
-          <Icon.Sparkle className="h-3.5 w-3.5" />
-          Ask Claude
+          <Icon.Terminal className="h-3.5 w-3.5" />
+          Terminal
         </button>
       </div>
     );

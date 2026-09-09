@@ -12,7 +12,9 @@ import {
 import { StatusTimeline } from './StatusTimeline';
 import { ActivityTimeline } from './ActivityTimeline';
 import { InterviewPrep } from './InterviewPrep';
+import { TagBadge } from './Badges';
 import { useDialog } from '../useDialog';
+import { api } from '../api';
 
 interface Props {
   open: boolean;
@@ -52,6 +54,7 @@ const EMPTY: Partial<Application> = {
   workHours: '',
   source: undefined,
   followUpDue: '',
+  tags: [],
 };
 
 type Tab = 'details' | 'tracking' | 'history';
@@ -61,13 +64,52 @@ export function EditModal({ open, entry, onClose, onSave, onDelete }: Props) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('details');
+  const [tagInput, setTagInput] = useState('');
+  const [smartInput, setSmartInput] = useState('');
+  const [smartParsing, setSmartParsing] = useState(false);
+  const [smartError, setSmartError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
     setForm(entry ? { ...entry } : { ...EMPTY });
     setError(null);
     setTab('details');
+    setTagInput('');
+    setSmartInput('');
+    setSmartParsing(false);
+    setSmartError(null);
   }, [open, entry]);
+
+  const handleSmartParse = async () => {
+    if (!smartInput.trim()) return;
+    setSmartParsing(true);
+    setSmartError(null);
+    try {
+      const isUrl = /^https?:\/\//i.test(smartInput.trim());
+      const res = await api.parseJobAd(isUrl ? { url: smartInput.trim() } : { text: smartInput.trim() });
+      setForm((prev) => ({
+        ...prev,
+        company: res.company || prev.company,
+        role: res.role || prev.role,
+        location: res.location || prev.location,
+        type: res.roleType || prev.type,
+        employment: res.employment || prev.employment,
+        workArrangement: res.workArrangement || prev.workArrangement,
+        salary: res.salary || prev.salary,
+        deadline: res.deadline || prev.deadline,
+        source: res.source || prev.source,
+        fit: res.fit || prev.fit,
+        tags: Array.from(new Set([...(prev.tags || []), ...(res.tags || [])])),
+        notes: res.notes ? (prev.notes ? `${prev.notes}\n\n${res.notes}` : res.notes) : prev.notes,
+        link: res.link || (isUrl ? smartInput.trim() : prev.link),
+      }));
+      setSmartInput('');
+    } catch (err) {
+      setSmartError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSmartParsing(false);
+    }
+  };
 
   const dialogRef = useDialog(open, onClose);
   const presence = useModalPresence(open);
@@ -118,7 +160,7 @@ export function EditModal({ open, entry, onClose, onSave, onDelete }: Props) {
         aria-modal="true"
         aria-labelledby="edit-title"
         tabIndex={-1}
-        className="mb-10 w-full max-w-2xl rounded-3xl border border-line bg-panel p-7 shadow-float outline-none"
+        className="mb-10 w-full max-w-2xl rounded-md border-2 border-line bg-panel p-6 shadow-hardMd outline-none"
       >
             <div className="mb-5 flex items-start justify-between gap-4">
               <div>
@@ -134,12 +176,55 @@ export function EditModal({ open, entry, onClose, onSave, onDelete }: Props) {
               </div>
               <button
                 onClick={onClose}
-                className="rounded-full p-1.5 text-ink-soft transition hover:bg-panel-2 hover:text-ink"
+                className="rounded-full border border-line p-1.5 text-ink-soft transition hover:border-accent hover:text-accent"
                 aria-label="Close"
               >
                 <Icon.Close />
               </button>
             </div>
+
+            {!displayEntry && (
+              <div className="mb-6 rounded-md border-2 border-dashed border-accent/40 bg-accent/[0.03] p-4">
+                <div className="flex items-center gap-1.5 text-label font-semibold text-accent">
+                  <Icon.Sparkles className="h-4 w-4" />
+                  <span>Smart Job Ingest (Auto-Extract with AI)</span>
+                </div>
+                <p className="mt-1 text-meta text-ink-soft">
+                  Paste a SEEK, LinkedIn, or Trade Me URL — or paste raw job ad text — to auto-fill fields instantly.
+                </p>
+                <div className="mt-2.5 flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="https://www.seek.co.nz/job/... or paste ad text"
+                    value={smartInput}
+                    onChange={(e) => setSmartInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSmartParse();
+                      }
+                    }}
+                    className="field-input text-meta flex-1"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSmartParse}
+                    disabled={smartParsing || !smartInput.trim()}
+                    className="btn-primary px-3.5 py-2 text-label inline-flex items-center gap-1.5 whitespace-nowrap"
+                  >
+                    {smartParsing ? (
+                      <Icon.Clock className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Icon.Sparkles className="h-3.5 w-3.5" />
+                    )}
+                    <span>{smartParsing ? 'Extracting…' : 'Extract'}</span>
+                  </button>
+                </div>
+                {smartError && (
+                  <p className="mt-2 text-meta text-rose font-medium">{smartError}</p>
+                )}
+              </div>
+            )}
 
             <div ref={tabsRef} className="relative mb-6 flex gap-1 border-b border-line">
               <span ref={tabPillRef} aria-hidden="true" className="pointer-events-none absolute -bottom-px left-0 top-auto h-[2px] bg-accent" />
@@ -289,6 +374,57 @@ export function EditModal({ open, entry, onClose, onSave, onDelete }: Props) {
                   <label className="field-label" htmlFor="f-link">Job ad link</label>
                   <input id="f-link" className="field-input" value={form.link ?? ''}
                     onChange={(e) => set('link', e.target.value)} placeholder="https://…" />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="field-label">
+                    Tags <span className="text-ink-faint">· e.g. SOT, Internship, Graduate</span>
+                  </label>
+                  <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-line bg-panel-2/40 p-2.5">
+                    {(form.tags ?? []).map((t) => (
+                      <TagBadge
+                        key={t}
+                        tag={t}
+                        onRemove={() => {
+                          const next = (form.tags ?? []).filter((x) => x !== t);
+                          set('tags', next);
+                        }}
+                      />
+                    ))}
+                    <input
+                      type="text"
+                      className="min-w-[150px] flex-1 bg-transparent px-2 py-0.5 text-body text-ink outline-none placeholder:text-ink-faint"
+                      placeholder={(form.tags ?? []).length === 0 ? "Type tag and press Enter (e.g. SOT)..." : "Add another tag..."}
+                      value={tagInput}
+                      onChange={(e) => setTagInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ',') {
+                          e.preventDefault();
+                          const clean = tagInput.trim().replace(/^#/, '');
+                          if (clean && !(form.tags ?? []).includes(clean)) {
+                            set('tags', [...(form.tags ?? []), clean]);
+                            setTagInput('');
+                          }
+                        }
+                      }}
+                    />
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-micro text-ink-faint">
+                    <span>Quick tags:</span>
+                    {['SOT', 'Internship', 'Graduate', 'Cyber', 'Govt'].map((sug) => {
+                      const has = (form.tags ?? []).includes(sug);
+                      if (has) return null;
+                      return (
+                        <button
+                          key={sug}
+                          type="button"
+                          onClick={() => set('tags', [...(form.tags ?? []), sug])}
+                          className="rounded-md border border-line bg-panel px-2 py-0.5 transition hover:border-accent/40 hover:text-ink"
+                        >
+                          + {sug}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
                 <div className="sm:col-span-2">
                   <label className="field-label" htmlFor="f-notes">Notes</label>

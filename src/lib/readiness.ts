@@ -15,6 +15,28 @@ export interface Readiness {
 
 export type ReadinessTone = 'grass' | 'accent' | 'amber' | 'rose';
 
+/**
+ * `cvStatus: 'queued'` is set the instant a request is made, but flipping it
+ * to 'drafted' depends on Claude editing applications.json directly outside
+ * the API (see the MCP-server/audit-log write-path notes) — if that step is
+ * skipped, races another writer, or just hasn't landed yet, cvStatus can get
+ * stuck at 'queued' forever even though the CV/cover letter genuinely exist.
+ * Real files on disk (folder-status, already deterministic — see
+ * `/api/folder-status`) always win over a field an AI run might have missed.
+ */
+export function isCvActuallyQueued(app: Application, folder?: FolderStatus): boolean {
+  if (app.cvStatus !== 'queued') return false;
+  return !(folder?.cv && folder?.coverLetter);
+}
+
+/** The done-side mirror of `isCvActuallyQueued` — a stuck 'queued' cvStatus
+ *  must not also hide the fact that both files already exist, or the UI
+ *  offers to generate from scratch instead of showing what's already there. */
+export function isCvActuallyDone(app: Application, folder?: FolderStatus): boolean {
+  if (app.cvStatus === 'drafted' || app.cvStatus === 'sent') return true;
+  return Boolean(folder?.cv && folder?.coverLetter);
+}
+
 /** The score→hue step, defined once here next to the function that produces
  *  the score. It used to be re-derived independently in two components, which
  *  is how they drifted into two different bar geometries. */

@@ -1,4 +1,5 @@
-import { useEffect, useRef, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { gsap, useGSAP, prefersReducedMotion } from '../lib/gsapSetup';
 import { Icon } from './Icons';
 import { isOutreachView, VIEW_KIND, KIND_META, type OutreachEntry, type View } from '../types';
@@ -9,7 +10,9 @@ interface Props {
   outreach: OutreachEntry[];
   pendingCount: number;
   onOpenTerminal: () => void;
+  onGmailFetch: () => void;
   onPrimary: () => void;
+  onHome?: () => void;
 }
 
 /**
@@ -52,13 +55,35 @@ export function PageHeader({
   outreach,
   pendingCount,
   onOpenTerminal,
+  onGmailFetch,
   onPrimary,
+  onHome,
 }: Props) {
+  const navigate = useNavigate();
   const hero = heroFor(view, appCount, outreach);
   const markRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
   const badgeRef = useRef<HTMLSpanElement>(null);
   const prevTitle = useRef(hero.title);
+  const [scrolled, setScrolled] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => {
+      setScrolled(window.scrollY > 30);
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  const handleHomeClick = (e?: React.MouseEvent) => {
+    if (e) e.preventDefault();
+    if (onHome) {
+      onHome();
+    } else {
+      navigate('/');
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   // Mount-only assembly of the three brand shapes, staggered — run once per
   // page load, never looped (DESIGN.md: a brand loop on a tool opened dozens
@@ -128,70 +153,112 @@ export function PageHeader({
   );
 
   return (
-    // Spans both columns so the title reads first on mobile, where the
-    // sidebar would otherwise push the filters above it.
-    <header className="mb-8 flex flex-wrap items-start justify-between gap-6 pt-4 md:col-span-2 md:mb-4 md:pt-10">
-      <div>
-        {/* The Bauhaus brand mark — circle/square/triangle, the spec's own
-            "geometric logo" rule, in the three primaries. Purely decorative,
-            so it's hidden from assistive tech; the h1 below carries the name. */}
-        <div
-          ref={markRef}
-          className="group/mark mb-1.5 flex w-fit cursor-default items-center gap-2"
-          aria-hidden="true"
-          onMouseEnter={poke}
-          onMouseLeave={unpoke}
+    // Spans both columns so the title reads first on mobile.
+    // Floating glassmorphic header capsule with rounded edges and backdrop blur.
+    <header
+      className={`sticky top-3 z-40 md:col-span-2 w-full transition-all duration-300 ${
+        scrolled
+          ? 'glass-header rounded-full py-2 px-4 sm:px-6 shadow-xl mb-4'
+          : 'glass-header rounded-2xl md:rounded-3xl p-3.5 sm:px-6 sm:py-3.5 mb-6'
+      } flex items-center justify-between gap-3`}
+    >
+      <div className="min-w-0">
+        <Link
+          to="/"
+          onClick={handleHomeClick}
+          className={`group/homelink flex ${
+            scrolled ? 'flex-row items-center gap-2.5' : 'flex-col items-start'
+          } focus:outline-none transition`}
+          title="Job Search HQ — Return to Pipeline Home"
+          aria-label="Job Search HQ — Pipeline Home"
         >
-          <span data-mark-shape className="h-3 w-3 rounded-full bg-accent" />
-          <span data-mark-shape className="h-3 w-3 rounded-sm bg-applied" />
-          <span
-            data-mark-shape
-            className="h-3 w-3 bg-primary-yellow"
-            style={{ clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)' }}
-          />
-        </div>
-        {/* Apple's large-title pattern scales down one step on a phone
-            (~40px, DESIGN.md's existing `stat` token) rather than running
-            the full 44px `display` size into a 375px-wide viewport. The
-            section you're in is the single most important piece of state on
-            the page, so switching sections crossfades the text (see the
-            useEffect above) rather than silently swapping under a static
-            heading. */}
-        <h1
-          ref={titleRef}
-          className="flex items-center gap-3 text-stat font-black uppercase tracking-tighter sm:text-display"
-        >
-          {hero.title}
-          <span aria-hidden="true" className="emoji text-[0.72em] leading-none">
-            {hero.emoji}
-          </span>
-        </h1>
-        <p className="mt-2.5 text-subhead text-ink-soft">{hero.subtitle}</p>
+          {/* Brand mark — circle/square/triangle */}
+          <div
+            ref={markRef}
+            className={`group/mark flex w-fit cursor-pointer items-center gap-1.5 ${
+              scrolled ? '' : 'mb-0.5'
+            }`}
+            aria-hidden="true"
+            onMouseEnter={poke}
+            onMouseLeave={unpoke}
+          >
+            <span
+              data-mark-shape
+              className={`${
+                scrolled ? 'h-2 w-2' : 'h-2.5 w-2.5'
+              } rounded-full bg-accent transition-transform duration-200 group-hover/homelink:scale-110 shadow-sm`}
+            />
+            <span
+              data-mark-shape
+              className={`${
+                scrolled ? 'h-2 w-2' : 'h-2.5 w-2.5'
+              } rounded-[3px] bg-applied transition-transform duration-200 group-hover/homelink:scale-110 shadow-sm`}
+            />
+            <span
+              data-mark-shape
+              className={`${
+                scrolled ? 'h-2 w-2' : 'h-2.5 w-2.5'
+              } bg-primary-yellow transition-transform duration-200 group-hover/homelink:scale-110 shadow-sm`}
+              style={{ clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)' }}
+            />
+            <span
+              className={`rounded-full border border-accent/25 bg-accent/10 px-1.5 py-0.2 text-[9px] font-bold uppercase tracking-wider text-accent font-mono transition-opacity ${
+                scrolled ? 'opacity-100' : 'opacity-0 group-hover/homelink:opacity-100'
+              }`}
+            >
+              Home
+            </span>
+          </div>
+          <h1
+            ref={titleRef}
+            className={`flex items-center gap-2 font-black uppercase tracking-tight text-ink group-hover/homelink:text-accent transition-all ${
+              scrolled
+                ? 'text-sm sm:text-base'
+                : 'text-base sm:text-lg md:text-xl'
+            }`}
+          >
+            {hero.title}
+            <span aria-hidden="true" className="emoji text-[0.8em] leading-none">
+              {hero.emoji}
+            </span>
+          </h1>
+        </Link>
+        {!scrolled && (
+          <p className="mt-0.5 text-xs text-ink-soft font-medium truncate max-w-[260px] sm:max-w-none">
+            {hero.subtitle}
+          </p>
+        )}
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 shrink-0">
+        <button
+          onClick={onGmailFetch}
+          className="btn-quiet h-8.5 sm:h-9 rounded-full px-2.5 sm:px-3 text-xs font-semibold gap-1.5"
+          title="Check your last 10 emails for job-tracker updates"
+          aria-label="Check Gmail"
+        >
+          <Icon.Gmail className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">Gmail</span>
+        </button>
+
         <button
           onClick={onOpenTerminal}
-          className="btn-quiet relative"
+          className="btn-quiet h-8.5 sm:h-9 rounded-full px-2.5 sm:px-3 text-xs font-semibold gap-1.5 relative"
           title={
             pendingCount > 0
-              ? `Ask Claude (Ctrl+J) — ${pendingCount} pending request${pendingCount === 1 ? '' : 's'}`
-              : 'Ask Claude (Ctrl+J)'
+              ? `Terminal (Ctrl+J) — ${pendingCount} pending request${pendingCount === 1 ? '' : 's'}`
+              : 'Terminal (Ctrl+J)'
           }
-          aria-label="Ask Claude"
+          aria-label="Terminal"
         >
-          <Icon.Terminal className="h-4 w-4" />
-          <span className="hidden sm:inline">Claude</span>
-          {/* A queued Claude run is the app's one genuinely in-flight state,
-              so this is where the pulse ring belongs: the count says how
-              many, the ring says it's moving right now. Spring-scales in when
-              the first request lands rather than popping. */}
+          <Icon.Terminal className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">Terminal</span>
           {pendingCount > 0 && (
             <span
               ref={badgeRef}
-              className="live-dot absolute -right-2 -top-2 flex h-[18px] min-w-[18px] items-center
-                         justify-center border-2 border-line bg-amber px-1 text-label
-                         font-bold tabular-nums text-canvas"
+              className="live-dot absolute -right-1 -top-1 flex h-4 min-w-[16px] items-center
+                         justify-center rounded-full border border-line bg-amber px-1 text-[10px]
+                         font-bold tabular-nums text-canvas shadow-sm"
               style={{ '--pulse': 'var(--amber)' } as CSSProperties}
               aria-hidden="true"
             >
@@ -199,10 +266,14 @@ export function PageHeader({
             </span>
           )}
         </button>
-        <button onClick={onPrimary} className="btn-primary">
-          <Icon.Plus className="h-4 w-4" />
-          {hero.primaryLabel}
-          <span aria-hidden="true" className="emoji text-[13px]">
+
+        <button
+          onClick={onPrimary}
+          className="btn-primary h-8.5 sm:h-9 rounded-full px-3 sm:px-4 text-xs font-bold gap-1.5 shadow-md"
+        >
+          <Icon.Plus className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">{hero.primaryLabel}</span>
+          <span aria-hidden="true" className="emoji text-[11px]">
             ✨
           </span>
         </button>

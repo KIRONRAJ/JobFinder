@@ -15,6 +15,11 @@ import type {
   StudyData,
   StudyGuideProgress,
   UpskillReport,
+  Employment,
+  Fit,
+  RoleType,
+  Source,
+  WorkArrangement,
 } from './types';
 import type {
   Confidence as TermConfidence,
@@ -41,6 +46,39 @@ export interface OutreachEmailDraft {
   relPath: string;
   body: string;
   mtime: number;
+}
+
+export interface AppDocumentFile {
+  name: string;
+  kind: 'cvPdf' | 'cvDocx' | 'coverPdf' | 'coverDocx' | 'other';
+  ext: string;
+  size: number;
+  mtime: number;
+  url: string;
+}
+
+export interface AppDocumentsResponse {
+  exists: boolean;
+  folderPath?: string;
+  company?: string;
+  role?: string;
+  files: AppDocumentFile[];
+}
+
+export interface ParsedJobAd {
+  company: string;
+  role: string;
+  location: string;
+  roleType: RoleType;
+  employment: Employment;
+  workArrangement?: WorkArrangement;
+  salary?: string;
+  deadline?: string;
+  source?: Source;
+  fit?: Fit;
+  tags?: string[];
+  notes?: string;
+  link?: string;
 }
 
 /**
@@ -155,10 +193,32 @@ export const api = {
       body: JSON.stringify({ note: note || '' }),
     }),
 
-  openFolder: (folderPath: string) =>
-    request<{ ok: true }>('/api/open-folder', {
+  // The Express server now runs on servo (Linux), a different machine from
+  // the browser, so it can't launch Explorer on the client PC — that has to
+  // happen client-side via a registered `openfolder://` protocol handler
+  // (see Required Documents/README or ask Claude for the Windows setup).
+  openFolder: (folderPath: string) => {
+    const windowsPath = 'O:\\' + folderPath.split('/').join('\\');
+    window.location.href = 'openfolder:' + encodeURIComponent(windowsPath);
+    return Promise.resolve({ ok: true as const });
+  },
+
+  /** Lists available generated documents (.pdf, .docx) for an application (v5.0) */
+  getDocuments: (id: string) => request<AppDocumentsResponse>(`/api/applications/${id}/documents`),
+
+  /** URL to directly download a document from the server */
+  documentDownloadUrl: (id: string, filename: string) =>
+    `/api/applications/${encodeURIComponent(id)}/documents/${encodeURIComponent(filename)}?download=1`,
+
+  /** URL to view/stream a document inline in browser */
+  documentInlineUrl: (id: string, filename: string) =>
+    `/api/applications/${encodeURIComponent(id)}/documents/${encodeURIComponent(filename)}`,
+
+  /** Smart AI parsing of a job ad URL or raw text using Gemini Flash (v5.0) */
+  parseJobAd: (data: { url?: string; text?: string }) =>
+    request<ParsedJobAd>('/api/jobs/parse', {
       method: 'POST',
-      body: JSON.stringify({ folderPath }),
+      body: JSON.stringify(data),
     }),
 
   folderStatus: () => request<Record<string, FolderStatus>>('/api/folder-status'),

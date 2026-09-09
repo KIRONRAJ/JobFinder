@@ -33,34 +33,36 @@ export function UpskillReportPanel() {
   });
 
   return (
-    <section className="mb-6 rounded-2xl border border-line bg-panel p-5">
-      <header className="mb-3 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-micro font-medium uppercase tracking-wide text-ink-soft">
+    <section className="mb-6 rounded-md border-2 border-line bg-panel p-5 shadow-hardSm">
+      <header className="mb-3 flex items-center justify-between border-b border-line-soft pb-2.5">
+        <div className="flex items-center gap-2 text-micro font-bold uppercase tracking-wider text-ink-soft">
           <Icon.GradCap className="h-3.5 w-3.5 text-accent" />
-          Upskill report
+          <span>Upskill Recommendations</span>
         </div>
-        <span className="text-label text-ink-faint">Generated {generated}</span>
+        <span className="text-micro font-mono text-ink-faint">Updated {generated}</span>
       </header>
 
-      <p className="text-meta leading-relaxed text-ink">{report.headline}</p>
+      <p className="text-meta leading-relaxed text-ink font-medium">{report.headline}</p>
 
       {report.recurringGaps.length > 0 && (
-        <ul className="mt-4 space-y-2.5">
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
           {report.recurringGaps.map((g) => (
-            <li
+            <div
               key={g.skill}
-              className="rounded-xl border border-line-soft bg-panel-2/50 px-3.5 py-3"
+              className="rounded-md border border-line bg-panel-2/40 p-3.5 shadow-hardXs flex flex-col justify-between"
             >
-              <p className="flex items-baseline justify-between gap-2 text-meta font-medium text-ink">
-                {g.skill}
-                <span className="shrink-0 text-micro font-normal text-ink-faint">
-                  {g.count} {g.count === 1 ? 'role' : 'roles'}
-                </span>
-              </p>
-              <p className="mt-1 text-micro text-ink-soft">{g.roles.join(' · ')}</p>
-            </li>
+              <div>
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-meta font-bold text-ink">{g.skill}</span>
+                  <span className="rounded border border-line bg-panel px-1.5 py-0.5 text-micro font-mono font-semibold text-accent shadow-hardXs">
+                    {g.count} {g.count === 1 ? 'role' : 'roles'}
+                  </span>
+                </div>
+                <p className="mt-1.5 text-micro text-ink-soft">{g.roles.join(' · ')}</p>
+              </div>
+            </div>
           ))}
-        </ul>
+        </div>
       )}
 
       {report.recommendations.length > 0 && (

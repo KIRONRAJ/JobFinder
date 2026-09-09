@@ -1,0 +1,44 @@
+[
+  {
+    "file": "fallback-1.jpg",
+    "photographer": "Steve A Johnson",
+    "photographerUrl": "https://www.pexels.com/@steve",
+    "pageUrl": "https://www.pexels.com/photo/iron-silver-tunnel-12696432/",
+    "avgColor": "#505058"
+  },
+  {
+    "file": "fallback-2.jpg",
+    "photographer": "Jakub Pabis",
+    "photographerUrl": "https://www.pexels.com/@jakub-pabis-147246622",
+    "pageUrl": "https://www.pexels.com/photo/close-up-of-electronic-microchips-on-circuit-board-36169774/",
+    "avgColor": "#2F393B"
+  },
+  {
+    "file": "fallback-3.jpg",
+    "photographer": "panumas nikhomkhai",
+    "photographerUrl": "https://www.pexels.com/@cookiecutter",
+    "pageUrl": "https://www.pexels.com/photo/data-center-server-racks-with-active-equipment-37730212/",
+    "avgColor": "#244D4F"
+  },
+  {
+    "file": "fallback-4.jpg",
+    "photographer": "Seraphfim Gallery",
+    "photographerUrl": "https://www.pexels.com/@seraphfim",
+    "pageUrl": "https://www.pexels.com/photo/line-of-code-on-laptop-screen-27427258/",
+    "avgColor": "#4A4436"
+  },
+  {
+    "file": "fallback-5.jpg",
+    "photographer": "panumas nikhomkhai",
+    "photographerUrl": "https://www.pexels.com/@cookiecutter",
+    "pageUrl": "https://www.pexels.com/photo/computer-server-in-data-center-room-17489163/",
+    "avgColor": "#1579B7"
+  },
+  {
+    "file": "fallback-6.jpg",
+    "photographer": "Tima Miroshnichenko",
+    "photographerUrl": "https://www.pexels.com/@tima-miroshnichenko",
+    "pageUrl": "https://www.pexels.com/photo/a-man-and-woman-sitting-at-a-table-with-an-abundance-of-cash-6266446/",
+    "avgColor": "#7A7A7A"
+  }
+]

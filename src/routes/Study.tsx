@@ -36,9 +36,12 @@ function guideReadiness(p: StudyGuideProgress | undefined) {
   return { score: Math.round((done / checks.length) * 100), breakdown: checks };
 }
 
-type Tab = 'guides' | 'roles' | 'assessment' | 'questions';
+import { SotHub } from '../components/SotHub';
+
+type Tab = 'sot' | 'guides' | 'roles' | 'assessment' | 'questions';
 
 const TABS: { key: Tab; label: string; sub: string; icon: (p: { className?: string }) => JSX.Element }[] = [
+  { key: 'sot', label: 'Summer of Tech', sub: 'Meet & Greet & 27 Roles', icon: Icon.Handshake },
   { key: 'guides', label: 'Skill guides', sub: 'Learn a topic', icon: Icon.GradCap },
   { key: 'roles', label: 'Role refreshers', sub: 'Revise for an interview', icon: Icon.Target },
   { key: 'questions', label: 'Answer bank', sub: 'Rehearse the questions', icon: Icon.Chat },
@@ -60,13 +63,13 @@ const TAB_KEYS = new Set<string>(TABS.map((t) => t.key));
 export function Study({ apps, onOpenTerminal }: { apps: Application[]; onOpenTerminal: () => void }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
-  const tab: Tab = tabParam && TAB_KEYS.has(tabParam) ? (tabParam as Tab) : 'guides';
+  const tab: Tab = tabParam && TAB_KEYS.has(tabParam) ? (tabParam as Tab) : 'sot';
 
   const setTab = (t: Tab) =>
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
-        if (t === 'guides') next.delete('tab');
+        if (t === 'sot') next.delete('tab');
         else next.set('tab', t);
         return next;
       },
@@ -83,7 +86,9 @@ export function Study({ apps, onOpenTerminal }: { apps: Application[]; onOpenTer
         ariaLabel="Study section"
       />
 
-      {tab === 'guides' ? (
+      {tab === 'sot' ? (
+        <SotHub />
+      ) : tab === 'guides' ? (
         <SkillGuides />
       ) : tab === 'roles' ? (
         <RoleRefreshers apps={apps} onOpenTerminal={onOpenTerminal} />

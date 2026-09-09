@@ -1,7 +1,8 @@
 import { AppliedTag, CvTag, DeadlineTag, EvidenceTag, FollowUpTag, NextActionTag, PriorityTag } from '../components/Badges';
 import { resolveEvidenceMap, countByState } from './evidenceState';
+import { isCvActuallyQueued } from './readiness';
 import { DEADLINE_SOON_DAYS, STALE_APPLIED_DAYS, daysSince, daysUntil } from '../types';
-import type { Application } from '../types';
+import type { Application, FolderStatus } from '../types';
 
 export type SignalTone = 'blocking' | 'urgent' | 'priority' | 'inflight';
 
@@ -28,7 +29,7 @@ const CLOSED_STATUSES: Application['status'][] = ['rejected', 'withdrawn', 'offe
  * a "+N" for the rest) — this only ranks, it doesn't truncate, so a caller
  * that wants to know the true overflow count still can.
  */
-export function rowSignals(app: Application): RowSignal[] {
+export function rowSignals(app: Application, folder?: FolderStatus): RowSignal[] {
   const signals: RowSignal[] = [];
 
   // Blocking: CV wording the evidence doesn't back — the one evidence state
@@ -108,8 +109,9 @@ export function rowSignals(app: Application): RowSignal[] {
     });
   }
 
-  // In-flight: a CV draft in progress.
-  if (app.cvStatus === 'queued') {
+  // In-flight: a CV draft in progress. Real files on disk (folder) win over
+  // a stale cvStatus — see isCvActuallyQueued.
+  if (isCvActuallyQueued(app, folder)) {
     signals.push({
       key: 'cv',
       weight: 60,

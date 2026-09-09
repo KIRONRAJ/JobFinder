@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { exec, execFile, spawn } from 'node:child_process';
+import { exec, spawn } from 'node:child_process';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import notifier from 'node-notifier';
@@ -15,6 +15,10 @@ import {
   outreachNotionEnabled,
   fetchUserFields,
 } from './notion.js';
+import { startTelegramNotifier, findCvDocument } from './notify-telegram.js';
+import { startTelegramCommands } from './telegram-commands.js';
+import { startMorningBriefing } from './telegram-briefing.js';
+import { startCvWorker, fetchJobText } from './cv-worker.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -41,13 +45,18 @@ const REQUESTS_DIR = path.join(APP_DIR, 'requests');
 const ENV_FILE = path.join(APP_DIR, '.env');
 
 /**
- * Loads App/.env into process.env (only filling keys not already set by the
- * real environment). Nothing did this before — notion.js has its own private
- * env reader that only populates a local object, never process.env, which
- * left `TAILSCALE_IP` in .env.example dead on arrival. Needed now because
- * APP_PASSWORD_HASH/SESSION_SECRET below must actually be visible here.
- * Duplicated from notion.js's version rather than shared, to avoid touching
- * code that already works.
+ * Loads App/.env into process.env, overriding any ambient environment
+ * variable of the same name. This app only ever runs on this one machine
+ * (no separate deploy environment with its own env vars to defer to), so
+ * .env is the single source of truth — a stray User-level env var from an
+ * unrelated tool (e.g. another app also exporting TELEGRAM_BOT_TOKEN
+ * globally) must never silently win over this app's own secret. Nothing did
+ * this before — notion.js has its own private env reader that only
+ * populates a local object, never process.env, which left `TAILSCALE_IP` in
+ * .env.example dead on arrival. Needed now because APP_PASSWORD_HASH/
+ * SESSION_SECRET below must actually be visible here. Duplicated from
+ * notion.js's version rather than shared, to avoid touching code that
+ * already works.
  */
 function loadEnvFile() {
   let file = ENV_FILE;
@@ -70,7 +79,7 @@ function loadEnvFile() {
         .slice(eq + 1)
         .trim()
         .replace(/^["']|["']$/g, '');
-      if (process.env[key] === undefined) process.env[key] = value;
+      process.env[key] = value;
     }
   } catch {
     /* no .env — fine */
@@ -107,7 +116,7 @@ app.use((req, res, next) => {
   const origin = req.get('origin');
   if (
     origin &&
-    !/^http:\/\/(localhost|127\.0\.0\.1|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}):\d+$/.test(
+    !/^https?:\/\/(localhost|127\.0\.0\.1|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}|servo|[a-z0-9-]+\.ts\.net)(:\d+)?$/i.test(
       origin
     )
   ) {
@@ -213,8 +222,18 @@ function clearSessionCookie(res) {
   res.setHeader('Set-Cookie', 'session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');
 }
 
+function verifyMcpToken(header) {
+  const expected = process.env.MCP_AUTH_TOKEN;
+  if (!expected || !header) return false;
+  const provided = header.startsWith('Bearer ') ? header.slice(7) : header;
+  const providedBuf = Buffer.from(provided);
+  const expectedBuf = Buffer.from(expected);
+  return providedBuf.length === expectedBuf.length && crypto.timingSafeEqual(providedBuf, expectedBuf);
+}
+
 function requireAuth(req, res, next) {
   if (verifySession(getCookie(req, 'session'))) return next();
+  if (verifyMcpToken(req.get('Authorization'))) return next();
   res.status(401).json({ error: 'Not authenticated' });
 }
 
@@ -564,14 +583,24 @@ async function relocateFolder(entry) {
   const destDir = safeCareerPath(path.join(label, companyName));
   if (!destDir || destDir === current) return;
 
-  if (await pathExists(destDir)) {
-    // Don't clobber an unrelated folder that happens to share a name.
-    console.error(`relocateFolder: destination already exists, skipping move: ${destDir}`);
-    return;
-  }
-
   await fs.mkdir(path.dirname(destDir), { recursive: true });
-  await fs.rename(current, destDir);
+  if (await pathExists(destDir)) {
+    // Same company already has a folder here (a different role applied
+    // earlier) — merge files in rather than skipping the move, since
+    // filenames are per-role ("CV - Company - Role.docx") and won't collide.
+    for (const file of await fs.readdir(current)) {
+      const from = path.join(current, file);
+      const to = path.join(destDir, file);
+      if (await pathExists(to)) {
+        console.error(`relocateFolder: file already exists at destination, skipping: ${to}`);
+        continue;
+      }
+      await fs.rename(from, to);
+    }
+    await fs.rmdir(current).catch(() => {});
+  } else {
+    await fs.rename(current, destDir);
+  }
   entry.folderPath = path.join(label, companyName).split(path.sep).join('/');
 }
 
@@ -2427,26 +2456,9 @@ app.patch('/api/study/:guide', async (req, res) => {
 });
 
 // ---------- folders ----------
-
-app.post('/api/open-folder', async (req, res) => {
-  try {
-    const target = safeCareerPath(req.body?.folderPath);
-    if (!target) return res.status(400).json({ error: 'Invalid folder path' });
-    if (!fsSync.existsSync(target)) {
-      return res.status(404).json({ error: 'Folder does not exist yet' });
-    }
-    // execFile, not exec — never touches a shell, so target (already
-    // constrained inside "Career and Job" by safeCareerPath) can't be
-    // shell-interpreted even in principle.
-    execFile('explorer', [target], () => {
-      // Windows explorer returns a non-zero exit code even on success, so the
-      // callback result is deliberately ignored.
-    });
-    res.json({ ok: true, opened: target });
-  } catch (err) {
-    res.status(500).json({ error: String(err) });
-  }
-});
+// Opening the folder in Explorer is now done client-side (see api.ts's
+// openFolder) — this server runs on servo, a different machine from the
+// browser, so it has no way to launch a program on the client PC.
 
 // Reports whether each entry's company folder actually has CV/cover-letter
 // files on disk, so the UI can show real state instead of trusting cvStatus.
@@ -2471,6 +2483,198 @@ app.get('/api/folder-status', async (_req, res) => {
     res.json(out);
   } catch (err) {
     res.status(500).json({ error: String(err) });
+  }
+});
+
+// ---------- document serving & preview (v5.0) ----------
+
+// Reports and lists available documents (.pdf, .docx) for an application
+app.get('/api/applications/:id/documents', async (req, res) => {
+  try {
+    const list = await readData();
+    const entry = list.find((a) => a.id === req.params.id);
+    if (!entry || !entry.folderPath) {
+      return res.json({ exists: false, files: [] });
+    }
+    const dir = safeCareerPath(entry.folderPath);
+    if (!dir || !fsSync.existsSync(dir)) {
+      return res.json({ exists: false, folderPath: entry.folderPath, files: [] });
+    }
+    const dirFiles = await fs.readdir(dir);
+    const files = [];
+    for (const f of dirFiles) {
+      const ext = path.extname(f).toLowerCase();
+      if (!['.pdf', '.docx', '.txt', '.md'].includes(ext)) continue;
+      try {
+        const st = fsSync.statSync(path.join(dir, f));
+        let kind = 'other';
+        if (/^CV/i.test(f)) kind = ext === '.pdf' ? 'cvPdf' : 'cvDocx';
+        else if (/^Cover Letter/i.test(f)) kind = ext === '.pdf' ? 'coverPdf' : 'coverDocx';
+        files.push({
+          name: f,
+          kind,
+          ext: ext.slice(1),
+          size: st.size,
+          mtime: st.mtimeMs,
+          url: `/api/applications/${encodeURIComponent(entry.id)}/documents/${encodeURIComponent(f)}`,
+        });
+      } catch {}
+    }
+    const kindOrder = { cvPdf: 1, cvDocx: 2, coverPdf: 3, coverDocx: 4, other: 5 };
+    files.sort((a, b) => (kindOrder[a.kind] || 99) - (kindOrder[b.kind] || 99));
+    res.json({
+      exists: true,
+      folderPath: entry.folderPath,
+      company: entry.company,
+      role: entry.role,
+      files,
+    });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Streams or downloads a specific document file from an application's folder
+app.get('/api/applications/:id/documents/:filename', async (req, res) => {
+  try {
+    const list = await readData();
+    const entry = list.find((a) => a.id === req.params.id);
+    if (!entry || !entry.folderPath) {
+      return res.status(404).json({ error: 'Application or folder not found' });
+    }
+    const dir = safeCareerPath(entry.folderPath);
+    if (!dir || !fsSync.existsSync(dir)) {
+      return res.status(404).json({ error: 'Folder does not exist' });
+    }
+    const safeName = path.basename(req.params.filename);
+    const ext = path.extname(safeName).toLowerCase();
+    if (!['.pdf', '.docx', '.txt', '.md'].includes(ext)) {
+      return res.status(400).json({ error: 'Unsupported file type' });
+    }
+    const filePath = path.join(dir, safeName);
+    if (!fsSync.existsSync(filePath)) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+
+    if (ext === '.pdf') {
+      res.setHeader('Content-Type', 'application/pdf');
+    } else if (ext === '.docx') {
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    } else if (ext === '.md') {
+      res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+    } else {
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    }
+
+    const isDownload = req.query.download === '1' || req.query.download === 'true';
+    res.setHeader('Content-Disposition', `${isDownload ? 'attachment' : 'inline'}; filename="${safeName}"`);
+    res.sendFile(filePath);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ---------- AI Smart Job Ingestion (v5.0) ----------
+
+// Parses job URL or raw text using Gemini Flash to auto-extract structured application fields
+app.post('/api/jobs/parse', async (req, res) => {
+  try {
+    const { url, text } = req.body || {};
+    if (!url && !text) {
+      return res.status(400).json({ error: 'Please provide either a job URL or job description text.' });
+    }
+
+    let jobContent = (text || '').trim();
+    if (url && !jobContent) {
+      try {
+        jobContent = await fetchJobText(url);
+      } catch (err) {
+        console.warn('fetchJobText error:', err.message);
+      }
+    }
+
+    if (!jobContent) {
+      return res.status(400).json({
+        error: 'Could not extract content from the URL. Please paste the job description text.',
+      });
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return res.status(503).json({ error: 'GEMINI_API_KEY is not configured on the server.' });
+    }
+
+    const prompt = `You are an expert recruitment assistant and job-tracker parser for Kironraj Odatt Peringode (Cyber Security & IT graduate with Master of IT from Whitecliffe College, seeking SOC Analyst, GRC, Network Security, IT Security Support, or Cybersecurity roles in New Zealand).
+
+Analyze this job listing and extract structured application fields as JSON:
+- company: string (employer name)
+- role: string (exact role title)
+- location: string (city or region, e.g. "Wellington", "Auckland", "Remote")
+- roleType: string (strictly one of: "SOC Analyst", "GRC", "Network Security", "IT Security Support", "Other")
+- employment: string (strictly "job" or "internship")
+- workArrangement: string (strictly "onsite", "hybrid", or "remote")
+- salary: string (e.g. "$70,000 - $85,000" or empty string if not stated)
+- deadline: string (YYYY-MM-DD format if stated, else empty string)
+- source: string (strictly one of: "Seek", "LinkedIn", "Summer of Tech", "Trade Me Jobs", "Company site", "Other")
+- fit: string (strictly one of: "strong", "good", "stretch")
+- tags: array of short strings (e.g. ["SOC", "SOT", "Junior", "Graduate", "Wellington"])
+- notes: string (2-3 concise sentences summarizing key requirements, essential tech stack, and why this role is or isn't a strong match)
+
+JOB LISTING:
+${jobContent.slice(0, 7000)}`;
+
+    const candidateModels = [
+      'gemini-3.5-flash',
+      'gemini-3.7-flash',
+      'gemini-3.6-flash',
+      'gemini-3.5-flash-lite',
+    ];
+
+    let rawJson = null;
+    let lastErr = null;
+
+    for (const model of candidateModels) {
+      try {
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: prompt }] }],
+              generationConfig: {
+                responseMimeType: 'application/json',
+                temperature: 0.1,
+              },
+            }),
+          }
+        );
+
+        if (!response.ok) {
+          lastErr = new Error(`Gemini ${model} HTTP ${response.status}: ${await response.text()}`);
+          continue;
+        }
+
+        const data = await response.json();
+        const textOut = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (textOut) {
+          rawJson = textOut;
+          break;
+        }
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+
+    if (!rawJson) {
+      return res.status(502).json({ error: lastErr ? lastErr.message : 'Failed to parse job with Gemini' });
+    }
+
+    const parsed = JSON.parse(rawJson);
+    if (url && !parsed.link) parsed.link = url;
+    res.json(parsed);
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
 });
 
@@ -2703,6 +2907,30 @@ function resolveClaudeBinary() {
 
 const CLAUDE_BIN = resolveClaudeBinary();
 
+/**
+ * gemini-cli's global npm install has no real .exe — on Windows the `gemini`
+ * command is a .cmd/.ps1 shim, which spawn({shell:false}) cannot launch
+ * directly (ENOENT). Running node on the package's actual JS entry point
+ * sidesteps that without needing shell:true (and the cmd.exe quoting/
+ * injection surface that would reopen).
+ */
+function resolveGeminiEntry() {
+  const candidates =
+    process.platform === 'win32'
+      ? [path.join(process.env.APPDATA || '', 'npm', 'node_modules', '@google', 'gemini-cli', 'bundle', 'gemini.js')]
+      : [
+          '/usr/local/lib/node_modules/@google/gemini-cli/bundle/gemini.js',
+          '/usr/lib/node_modules/@google/gemini-cli/bundle/gemini.js',
+        ];
+
+  for (const candidate of candidates) {
+    if (fsSync.existsSync(candidate)) return candidate;
+  }
+  return null; // Caught at spawn time via the child's 'error' event.
+}
+
+const GEMINI_ENTRY = resolveGeminiEntry();
+
 function buildJobhqPrompt(jobUrl) {
   return [
     `Use the jobhq skill to log this job into Job Search HQ: ${jobUrl}`,
@@ -2753,6 +2981,35 @@ function buildCommandPrompt(text) {
     'ambiguous, or is not related to the job search tracker at all, say so plainly',
     'in your reply rather than guessing at an action. Reply with a short, direct',
     'summary of what you did (or why you didn\'t act).',
+  ].join('\n');
+}
+
+/**
+ * The Gmail button's prompt — spelled out in prose rather than passed as a
+ * literal "/gmailfetch 10" string, matching buildJobhqPrompt/buildCommandPrompt's
+ * existing pattern: a cold-started `claude -p` process isn't the interactive
+ * REPL, so there's no guarantee a leading "/word" gets parsed as a slash
+ * command rather than literal text. Telling it in plain language to use the
+ * skill is the same reliable approach already used for every other button here.
+ * `count` only ever comes from the server's own default below, never straight
+ * from the request body unvalidated — see the route handler.
+ */
+function buildGmailfetchPrompt(count) {
+  return [
+    `Use the gmailfetch skill (Career and Job/App project root) to check the last ${count} emails`,
+    'across the whole mailbox (not just the inbox) for job-tracker updates, exactly as if',
+    `Kironraj had typed "/gmailfetch ${count}" into a chat session with that skill loaded.`,
+    '',
+    "Follow the skill's own SKILL.md step by step: fetch, match against",
+    '"Career and Job/App/data/applications.json", then classify and log per jobhq\'s existing',
+    'rules (references/rejection-learning-loop.md for a rejection, references/notion.md for the',
+    'Notion mirror) — read only what the matched emails actually need, skip the rest. Validate',
+    'applications.json and audit-log.jsonl after writing. Never send, reply to, archive, or label',
+    'any email — read-only, always.',
+    '',
+    'Reply with a tight summary per the skill\'s own Step 4: one line per matched-and-logged email',
+    '(company, role, what changed), one line for matched-but-nothing-new, and a single count for',
+    'everything unrelated. If nothing needed logging, say so plainly and stop.',
   ].join('\n');
 }
 
@@ -2837,10 +3094,10 @@ function buildProcessRequestsPrompt() {
 const SILENT_STREAM_EVENT_TYPES = new Set(['system', 'user', 'rate_limit_event']);
 
 /**
- * Turns one line of `--output-format stream-json` output into the {stream,
- * line} shape the client already renders.
+ * Turns one line of Claude's `--output-format stream-json` output into the
+ * {stream, line} shape the client already renders.
  */
-function translateStreamJsonLine(raw, push) {
+function translateClaudeStreamJsonLine(raw, push) {
   let event;
   try {
     event = JSON.parse(raw);
@@ -2885,6 +3142,73 @@ function translateStreamJsonLine(raw, push) {
   push('out', raw);
 }
 
+// Confirmed empirically (a real `-p "reply with pong" --output-format
+// stream-json` call) against gemini-cli 0.58.0: {"type":"init",...},
+// {"type":"message","role":"user"|"assistant","content","delta"}, and
+// {"type":"result","status":"success"|"error","error"?,"stats"}. No tool_use
+// event was observed yet (that call made no tool calls) — a real jobhq run
+// will exercise that path; until then an unrecognized event still falls
+// through to a raw dump below rather than being silently dropped.
+function translateGeminiStreamJsonLine(raw, push) {
+  let event;
+  try {
+    event = JSON.parse(raw);
+  } catch {
+    push('out', raw);
+    return;
+  }
+
+  if (event.type === 'message') {
+    if (event.role === 'assistant' && event.content) push('out', event.content);
+    // role: 'user' just echoes the prompt we already know — skip it.
+    return;
+  }
+
+  if (event.type === 'result') {
+    if (event.status === 'error' && event.error?.message) push('err', event.error.message);
+    const seconds =
+      typeof event.stats?.duration_ms === 'number' ? Math.round(event.stats.duration_ms / 1000) : null;
+    push('meta', seconds !== null ? `✓ Finished in ${seconds}s` : '✓ Finished');
+    return;
+  }
+
+  // tool_call / tool_result event names are a guess pending a real jobhq run —
+  // handle by shape rather than a specific type string, so this doesn't
+  // silently miss whatever gemini-cli actually calls them.
+  const toolName = event.name || event.tool_name || event.function?.name;
+  if (toolName) {
+    push('meta', `→ ${summarizeToolUse(toolName, event.args || event.input || event.function?.arguments)}`);
+    return;
+  }
+
+  if (event.type === 'init') return; // session bookkeeping only
+
+  // Genuinely unrecognized event type — surface it rather than dropping it.
+  push('out', raw);
+}
+
+const PROVIDERS = {
+  claude: {
+    bin: CLAUDE_BIN,
+    args: (prompt) => ['-p', prompt, '--dangerously-skip-permissions', '--output-format', 'stream-json', '--verbose'],
+    translateLine: translateClaudeStreamJsonLine,
+    label: 'Claude',
+  },
+  gemini: {
+    bin: process.execPath, // node itself — see resolveGeminiEntry
+    args: (prompt) => [
+      GEMINI_ENTRY ?? 'gemini', // null falls through to a clear ENOENT rather than a confusing arg-shift
+      '-p',
+      prompt,
+      '--yolo',
+      '--output-format',
+      'stream-json',
+    ],
+    translateLine: translateGeminiStreamJsonLine,
+    label: 'Gemini',
+  },
+};
+
 function summarizeToolUse(name, input) {
   const pathArg = input?.file_path || input?.path;
   if (pathArg) {
@@ -2902,8 +3226,11 @@ function summarizeToolUse(name, input) {
  * Shared by both /api/claude/run (a job URL) and /api/claude/process-requests
  * (no input at all) — everything past "what's the prompt and what do we tell
  * the user while it runs" is identical: spawn, stream, track for cancel/replay.
+ * `provider` selects which CLI binary/flags/stream-json dialect to use — see
+ * the PROVIDERS registry above.
  */
-function startClaudeRun(promptText, startMessage) {
+function startClaudeRun(promptText, startMessage, provider = 'claude') {
+  const providerConfig = PROVIDERS[provider] ?? PROVIDERS.claude;
   const runId = `run_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const run = {
     id: runId,
@@ -2926,21 +3253,17 @@ function startClaudeRun(promptText, startMessage) {
   };
 
   // shell: false is load-bearing — see resolveClaudeBinary above.
-  // stream-json + verbose gives one NDJSON event per assistant message/tool
-  // call as it happens, instead of plain -p mode's single buffered dump at
-  // the very end — that's what makes the log actually look real-time.
-  const child = spawn(
-    CLAUDE_BIN,
-    ['-p', promptText, '--dangerously-skip-permissions', '--output-format', 'stream-json', '--verbose'],
-    {
-      cwd: CAREER_DIR,
-      shell: false,
-      windowsHide: true,
-      // The prompt rides in argv; leaving stdin open makes Claude wait 3s
-      // and warn about missing piped input on every single run.
-      stdio: ['ignore', 'pipe', 'pipe'],
-    }
-  );
+  // stream-json gives one NDJSON event per assistant message/tool call as it
+  // happens, instead of plain -p mode's single buffered dump at the very
+  // end — that's what makes the log actually look real-time.
+  const child = spawn(providerConfig.bin, providerConfig.args(promptText), {
+    cwd: CAREER_DIR,
+    shell: false,
+    windowsHide: true,
+    // The prompt rides in argv; leaving stdin open makes these CLIs wait a
+    // few seconds and warn about missing piped input on every single run.
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
   run.child = child;
 
   push('meta', startMessage);
@@ -2954,11 +3277,11 @@ function startClaudeRun(promptText, startMessage) {
     const lines = stdoutBuffer.split('\n');
     stdoutBuffer = lines.pop() ?? '';
     for (const line of lines) {
-      if (line.trim()) translateStreamJsonLine(line, push);
+      if (line.trim()) providerConfig.translateLine(line, push);
     }
   });
   child.on('close' /* flush any trailing partial line */, () => {
-    if (stdoutBuffer.trim()) translateStreamJsonLine(stdoutBuffer, push);
+    if (stdoutBuffer.trim()) providerConfig.translateLine(stdoutBuffer, push);
   });
   child.stderr.on('data', (b) => push('err', b.toString()));
   child.on('close', (code) => {
@@ -2974,7 +3297,7 @@ function startClaudeRun(promptText, startMessage) {
     setTimeout(() => CLAUDE_RUNS.delete(runId), 10 * 60 * 1000);
   });
   child.on('error', (err) => {
-    push('err', `Could not start claude: ${err.message}`);
+    push('err', `Could not start ${providerConfig.label}: ${err.message}`);
     run.done = true;
     for (const send of run.listeners) send({ stream: 'done', line: '1' });
   });
@@ -2996,9 +3319,11 @@ app.post('/api/claude/run', async (req, res) => {
       return res.status(400).json({ error: 'Only http(s) job links are supported.' });
     }
 
+    const provider = req.body?.provider === 'gemini' ? 'gemini' : 'claude';
     const runId = startClaudeRun(
       buildJobhqPrompt(parsed.href),
-      `Running Claude against ${parsed.hostname}…`
+      `Running ${PROVIDERS[provider].label} against ${parsed.hostname}…`,
+      provider
     );
     res.status(202).json({ ok: true, runId });
   } catch (err) {
@@ -3019,7 +3344,12 @@ app.post('/api/claude/command', async (req, res) => {
     if (text.length > 20000) {
       return res.status(400).json({ error: "That's too long — trim it down and try again." });
     }
-    const runId = startClaudeRun(buildCommandPrompt(text), 'Running Claude against your request…');
+    const provider = req.body?.provider === 'gemini' ? 'gemini' : 'claude';
+    const runId = startClaudeRun(
+      buildCommandPrompt(text),
+      `Running ${PROVIDERS[provider].label} against your request…`,
+      provider
+    );
     res.status(202).json({ ok: true, runId });
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -3034,9 +3364,34 @@ app.post('/api/claude/command', async (req, res) => {
  */
 app.post('/api/claude/process-requests', async (req, res) => {
   try {
+    const provider = req.body?.provider === 'gemini' ? 'gemini' : 'claude';
     const runId = startClaudeRun(
       buildProcessRequestsPrompt(),
-      'Running Claude against the pending requests queue…'
+      `Running ${PROVIDERS[provider].label} against the pending requests queue…`,
+      provider
+    );
+    res.status(202).json({ ok: true, runId });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+/**
+ * The homescreen "Gmail" button — one press runs the gmailfetch skill against
+ * the last N emails, same real-CLI-spawn mechanism as "Process pending" above.
+ * `count` is clamped rather than trusted outright: this route sits behind the
+ * app's login wall same as every other /api/claude/* route, but there's no
+ * reason to let a stray huge number spawn an unbounded mailbox sweep.
+ */
+app.post('/api/claude/gmailfetch', async (req, res) => {
+  try {
+    const provider = req.body?.provider === 'gemini' ? 'gemini' : 'claude';
+    const requested = Number(req.body?.count);
+    const count = Number.isFinite(requested) && requested > 0 ? Math.min(Math.round(requested), 50) : 10;
+    const runId = startClaudeRun(
+      buildGmailfetchPrompt(count),
+      `Running ${PROVIDERS[provider].label} against your last ${count} emails…`,
+      provider
     );
     res.status(202).json({ ok: true, runId });
   } catch (err) {
@@ -3275,19 +3630,217 @@ process.on('unhandledRejection', (reason) => {
   console.error('Unhandled rejection (server kept running):', reason);
 });
 
+// Serve static production build if present (e.g. built via npm run build)
+const DIST_DIR = path.join(APP_DIR, 'dist');
+const hasDist = fsSync.existsSync(DIST_DIR);
+if (hasDist) {
+  app.use(express.static(DIST_DIR));
+  app.get('*', (req, res, next) => {
+    // API routes and missing static assets in /assets/ must not fall back to index.html
+    if (req.path.startsWith('/api/') || req.path.startsWith('/assets/')) return next();
+    res.sendFile(path.join(DIST_DIR, 'index.html'));
+  });
+}
+
 await ensureDirs();
+
+function detectTailscaleIp() {
+  if (process.env.TAILSCALE_IP) return process.env.TAILSCALE_IP;
+  const nets = os.networkInterfaces();
+  for (const list of Object.values(nets)) {
+    for (const net of list || []) {
+      const family = typeof net.family === 'string' ? net.family : (net.family === 4 ? 'IPv4' : 'IPv6');
+      if (family === 'IPv4' && !net.internal && net.address.startsWith('100.')) {
+        return net.address;
+      }
+    }
+  }
+  return null;
+}
+
 // Bound to loopback AND the Tailscale interface specifically — never
 // 0.0.0.0. This server can spawn Claude with permissions bypassed, so
 // "reachable from the tailnet Kironraj already controls" is as far as this
 // goes; the ordinary home Wi-Fi/LAN is deliberately not covered by either
 // bind, and the origin-check middleware above enforces the same boundary
 // regardless of which interface a request arrives on.
-const TAILSCALE_IP = process.env.TAILSCALE_IP || '100.122.103.6';
+const TAILSCALE_IP = process.env.TAILSCALE_IP || detectTailscaleIp() || '127.0.0.1';
 app.listen(PORT, '127.0.0.1', () => {
   console.log(`\n  Job Search HQ API  →  http://localhost:${PORT}`);
+  console.log(`  web UI: ${hasDist ? `on (serving ${DIST_DIR})` : 'off (no dist folder found)'}`);
   console.log(`  data: ${DATA_FILE}`);
   console.log(`  requests: ${REQUESTS_DIR}`);
   console.log(`  notion sync: ${notionEnabled ? 'on' : 'off (no NOTION_TOKEN in App/.env)'}\n`);
+  const telegramHandlers = {
+    getApplications: readData,
+    updateApplication: async (idOrKey, mutator, auditAction = 'update', auditDetail = '') => {
+      return withDataLock('applications', async () => {
+        const list = await readData();
+        const idx = list.findIndex((a) => a.id === idOrKey || a.matchKey === idOrKey);
+        if (idx === -1) return null;
+        const original = list[idx];
+        const updated = mutator({ ...original });
+        list[idx] = updated;
+        await writeData(list);
+        await appendAudit({
+          action: auditAction,
+          entryId: updated.id,
+          matchKey: updated.matchKey,
+          detail: auditDetail || `${updated.company} — ${updated.role}`,
+        });
+        syncToNotion(updated).catch((err) => console.error('Notion sync failed:', err.message));
+        return updated;
+      });
+    },
+    createApplication: async (entry) => {
+      return withDataLock('applications', async () => {
+        const list = await readData();
+        const now = Date.now();
+        const fullEntry = {
+          ...entry,
+          id: entry.id || uid(),
+          created: now,
+          updated: now,
+        };
+        fullEntry.matchKey = matchKeyFor(fullEntry);
+        fullEntry.statusHistory = [{ status: fullEntry.status || 'researching', at: now }];
+        fullEntry.activity = [{ at: now, kind: 'created', text: 'Captured via Telegram' }];
+
+        const existing = list.find(
+          (a) => a.matchKey === fullEntry.matchKey || (entry.link && a.link === entry.link)
+        );
+        if (existing) {
+          return { existing: true, entry: existing };
+        }
+
+        list.push(fullEntry);
+        await writeData(list);
+        await appendAudit({
+          action: 'create',
+          entryId: fullEntry.id,
+          matchKey: fullEntry.matchKey,
+          detail: `${fullEntry.company} — ${fullEntry.role}`,
+        });
+        syncToNotion(fullEntry).catch((err) => console.error('Notion sync failed:', err.message));
+        return { existing: false, entry: fullEntry };
+      });
+    },
+    deleteApplication: async (idOrKey) => {
+      return withDataLock('applications', async () => {
+        const list = await readData();
+        const idx = list.findIndex((a) => a.id === idOrKey || a.matchKey === idOrKey);
+        if (idx === -1) return false;
+        const [removed] = list.splice(idx, 1);
+        await writeData(list);
+        await appendAudit({
+          action: 'delete',
+          entryId: removed.id,
+          matchKey: removed.matchKey,
+          detail: `${removed.company} — ${removed.role}`,
+        });
+        return true;
+      });
+    },
+    queueCvRequest: async (idOrKey) => {
+      return withDataLock('applications', async () => {
+        const list = await readData();
+        const idx = list.findIndex((a) => a.id === idOrKey || a.matchKey === idOrKey);
+        if (idx === -1) return null;
+        const entry = list[idx];
+        await ensureDirs();
+        const payload = {
+          type: 'cv_request',
+          id: entry.id,
+          matchKey: entry.matchKey || matchKeyFor(entry),
+          role: entry.role || '',
+          company: entry.company || '',
+          link: entry.link || '',
+          folderPath: entry.folderPath || '',
+          redundant: await cvLooksCurrent(entry),
+          userFacts: entry.userFacts || '',
+          requestedAt: new Date().toISOString(),
+        };
+        const file = path.join(REQUESTS_DIR, `cv_request__${payload.matchKey}__${Date.now()}.json`);
+        await fs.writeFile(file, JSON.stringify(payload, null, 2), 'utf8');
+
+        list[idx] = { ...entry, cvStatus: 'queued', updated: Date.now() };
+        await writeData(list);
+
+        await appendAudit({
+          action: 'cv-request',
+          entryId: entry.id,
+          matchKey: payload.matchKey,
+          detail: `queued CV/cover letter for ${entry.company} — ${entry.role} (via Telegram)`,
+        });
+
+        return list[idx];
+      });
+    },
+    findCvFile: async (idOrKey) => {
+      const list = await readData();
+      const entry = list.find((a) => a.id === idOrKey || a.matchKey === idOrKey);
+      if (!entry) return null;
+      return findCvDocument(entry.matchKey, entry.id);
+    },
+    isGmailFetchBusy: () => {
+      for (const r of CLAUDE_RUNS.values()) {
+        if (!r.done && r.child) return true;
+      }
+      return false;
+    },
+    runGmailFetch: async ({ count = 10, provider = 'claude' } = {}) => {
+      for (const r of CLAUDE_RUNS.values()) {
+        if (!r.done && r.child) {
+          return { ok: false, busy: true, error: 'A run is already in flight' };
+        }
+      }
+      const safeCount = Number.isFinite(count) && count > 0 ? Math.min(Math.round(count), 50) : 10;
+      const runId = startClaudeRun(
+        buildGmailfetchPrompt(safeCount),
+        `Running ${PROVIDERS[provider].label} against your last ${safeCount} emails…`,
+        provider
+      );
+      const run = CLAUDE_RUNS.get(runId);
+      if (!run) return { ok: false, error: 'Could not start run' };
+
+      return new Promise((resolve) => {
+        const outputLines = [];
+        const errLines = [];
+
+        const listener = (event) => {
+          if (event.stream === 'out') {
+            outputLines.push(event.line);
+          } else if (event.stream === 'err') {
+            errLines.push(event.line);
+          } else if (event.stream === 'done') {
+            run.listeners.delete(listener);
+            const code = Number(event.line);
+            if (code === 0) {
+              const summary = outputLines.join('\n').trim();
+              resolve({
+                ok: true,
+                count: safeCount,
+                summary: summary || 'No job updates found in the checked emails.',
+              });
+            } else {
+              resolve({
+                ok: false,
+                count: safeCount,
+                error: errLines.join('\n').trim() || `Process exited with code ${code}`,
+              });
+            }
+          }
+        };
+
+        run.listeners.add(listener);
+      });
+    },
+  };
+
+  startTelegramNotifier();
+  startTelegramCommands(telegramHandlers);
+  startMorningBriefing({ getApplications: readData });
+  startCvWorker();
 });
 app
   .listen(PORT, TAILSCALE_IP, () => {
