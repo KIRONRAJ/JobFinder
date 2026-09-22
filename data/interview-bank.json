@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "questions": [
+    {
+      "id": "q_tell_me_about_yourself",
+      "category": "behavioural",
+      "question": "Tell me about yourself.",
+      "hints": [
+        "Present first, past second, future third — don't narrate your CV top to bottom.",
+        "Anchor on one or two roles most relevant to this job, not your whole history.",
+        "Name your strongest qualification once, briefly.",
+        "Close on why this specific role is the next step, not a detour.",
+        "Keep it to about 90 seconds, then stop talking."
+      ],
+      "answer": "I'm a support engineer with hands-on experience troubleshooting live production issues under SLA pressure. In my most recent role I handled escalations across a ticketing queue, working with upstream teams to close out incidents and documenting the fix so the same issue didn't repeat. I'm looking for a role where I can keep building that kind of operational depth on a team that takes reliability seriously."
+    },
+    {
+      "id": "q_conflict_with_teammate",
+      "category": "behavioural",
+      "question": "Tell me about a time you disagreed with a teammate.",
+      "hints": [
+        "Pick a real disagreement about approach, not a personality clash.",
+        "Show that you listened before you pushed back.",
+        "End with the outcome and what you'd do differently."
+      ],
+      "answer": "We disagreed on how to prioritize a backlog of tickets — I wanted to triage by SLA risk, they wanted to go oldest-first. We looked at the data together, agreed SLA risk was the better predictor of customer impact, and adjusted the process. The ticket backlog cleared faster and we kept using that triage rule afterward."
+    }
+  ]
+}

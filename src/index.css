@@ -1,0 +1,933 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Bauhaus redesign (DESIGN.md, 23 Aug 2026) — off-white canvas, stark-black
+       ink and borders, pure primaries reserved for accent/status/decoration.
+       Superseded the warm-neutral "ops console" palette; the underlying warmth
+       philosophy is gone on purpose, not an oversight. */
+    --canvas: 240 240 240;
+    --panel: 255 255 255;
+    --panel-2: 224 224 224;
+    --ink: 18 18 18;
+    --ink-soft: 68 68 68;
+    /* ~7:1 on --canvas and --panel — real body copy, not just decoration. */
+    --ink-faint: 89 89 89;
+    --line: 18 18 18;
+    --line-soft: 200 200 200;
+
+    /* Bauhaus red — the fixed accent, no longer user-themeable (a
+       user-swappable accent contradicts "one deliberate primary as the
+       action colour"). ~5.4:1 on white, safe for text/links, not just fills. */
+    --accent: 208 32 32;
+    --on-accent: 255 255 255;
+
+    /* Status hues, fixed meaning, never themed. `applied` was Bauhaus blue,
+       switched to green on request (27 Aug 2026) — a distinct emerald/teal
+       green, not a reuse of --grass, since `offer` already owns that exact
+       hue and the two need to stay tellable apart (icon still differs too:
+       Paperplane vs Trophy). `neutral`/`amber`/`rose`/`grass` are
+       contrast-tuned (4.5:1+ on white) rather than the pure poster hues —
+       see --primary-yellow below for the undarkened decorative version. */
+    --neutral: 92 92 92;
+    --applied: 15 128 94;
+    --amber: 138 109 10;
+    --rose: 166 27 27;
+    --grass: 21 122 64;
+    /* Pure Bauhaus yellow — decorative blocking only, fails 4.5:1 as text. */
+    --primary-yellow: 240 192 32;
+
+    /* The hard-shadow ink. Tracks --line rather than being hard-coded, so
+       the offset shadow stays visible when the canvas inverts. */
+    --shadow-hard: 18 18 18;
+    /* Default hue for .live-dot's expanding ring; overridden per instance. */
+    --pulse: 208 32 32;
+
+    color-scheme: light;
+  }
+
+  .dark {
+    --canvas: 18 18 18;
+    --panel: 28 28 28;
+    --panel-2: 38 38 38;
+    --ink: 240 240 240;
+    --ink-soft: 176 176 176;
+    --ink-faint: 158 158 158;
+    /* Borders switch to light grey in dark mode, not pure black — a black
+       border on a near-black panel would vanish. */
+    --line: 216 216 216;
+    --line-soft: 58 58 58;
+
+    --accent: 240 68 56;
+    --on-accent: 255 255 255;
+
+    --neutral: 168 168 168;
+    --applied: 45 194 155;
+    --amber: 217 168 46;
+    --rose: 201 70 61;
+    --grass: 52 179 104;
+    --primary-yellow: 224 176 28;
+
+    /* Matches --line's inversion. A #121212 shadow on a #121212 canvas is
+       not a shadow, which is exactly what the app shipped with. */
+    --shadow-hard: 216 216 216;
+    --pulse: 240 68 56;
+
+    color-scheme: dark;
+  }
+
+  /* Pulse — second selectable theme (genjutsu:paint, 30 Aug 2026). Same
+     variable names as Bauhaus above, so every Tailwind color token and every
+     component in @layer components picks it up for free; only shape/shadow
+     (which Bauhaus bakes as hard-coded Tailwind utilities, not vars) gets
+     explicit [data-theme="pulse"] overrides further down. --accent-2 is
+     Pulse-only, the gradient's second stop — undefined in Bauhaus on purpose,
+     never referenced outside a [data-theme="pulse"] rule. */
+  [data-theme='pulse'] {
+    --canvas: 251 247 255;
+    --panel: 255 255 255;
+    --panel-2: 241 236 252;
+    --ink: 22 19 31;
+    --ink-soft: 74 68 89;
+    --ink-faint: 110 102 128;
+    --line: 228 221 245;
+    --line-soft: 240 235 250;
+
+    --accent: 109 60 255;
+    --accent-2: 255 61 148;
+    --on-accent: 255 255 255;
+
+    --neutral: 106 98 122;
+    --applied: 14 159 118;
+    --amber: 184 121 10;
+    --rose: 214 41 90;
+    --grass: 22 163 74;
+    --primary-yellow: 214 168 40;
+
+    --shadow-hard: 228 221 245;
+    --pulse: 109 60 255;
+
+    color-scheme: light;
+  }
+
+  .dark[data-theme='pulse'] {
+    --canvas: 18 15 29;
+    --panel: 27 23 48;
+    --panel-2: 36 31 61;
+    --ink: 244 241 252;
+    --ink-soft: 183 175 209;
+    --ink-faint: 139 130 168;
+    --line: 51 44 82;
+    --line-soft: 34 29 54;
+
+    --accent: 139 107 255;
+    --accent-2: 255 92 174;
+    --on-accent: 255 255 255;
+
+    --neutral: 168 158 196;
+    --applied: 47 217 160;
+    --amber: 255 194 77;
+    --rose: 255 92 130;
+    --grass: 52 214 94;
+    --primary-yellow: 224 176 28;
+
+    --shadow-hard: 51 44 82;
+    --pulse: 139 107 255;
+
+    color-scheme: dark;
+  }
+
+  /* Cyber Obsidian — third selectable theme (v5.4.0). Deep slate-950 obsidian,
+     neon emerald & electric cyan accents, holographic borders, tech matrix glow. */
+  [data-theme='cyber'] {
+    --canvas: 243 247 246;
+    --panel: 255 255 255;
+    --panel-2: 235 242 240;
+    --ink: 15 23 42;
+    --ink-soft: 51 65 85;
+    --ink-faint: 100 116 139;
+    --line: 203 218 214;
+    --line-soft: 226 235 233;
+
+    --accent: 16 185 129;
+    --accent-2: 6 182 212;
+    --on-accent: 255 255 255;
+
+    --neutral: 100 116 139;
+    --applied: 16 185 129;
+    --amber: 217 119 6;
+    --rose: 225 29 72;
+    --grass: 16 185 129;
+    --primary-yellow: 202 138 4;
+
+    --shadow-hard: 203 218 214;
+    --pulse: 16 185 129;
+
+    color-scheme: light;
+  }
+
+  .dark[data-theme='cyber'] {
+    --canvas: 7 10 17;
+    --panel: 13 18 28;
+    --panel-2: 19 27 41;
+    --ink: 241 245 249;
+    --ink-soft: 148 163 184;
+    --ink-faint: 100 116 139;
+    --line: 30 41 59;
+    --line-soft: 20 28 42;
+
+    --accent: 16 185 129;
+    --accent-2: 6 182 212;
+    --on-accent: 7 10 17;
+
+    --neutral: 148 163 184;
+    --applied: 52 211 153;
+    --amber: 251 191 36;
+    --rose: 251 113 133;
+    --grass: 52 211 153;
+    --primary-yellow: 234 179 8;
+
+    --shadow-hard: 30 41 59;
+    --pulse: 52 211 153;
+
+    color-scheme: dark;
+  }
+
+  * {
+    @apply border-line;
+  }
+
+  /* Prevent unbroken text, links, or hashes from overflowing containers */
+  p, h1, h2, h3, h4, h5, h6, li, dd, dt, blockquote {
+    overflow-wrap: break-word;
+  }
+
+  html {
+    overflow-y: scroll;
+    overflow-x: hidden;
+    max-width: 100vw;
+    scrollbar-gutter: stable;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-canvas text-ink font-sans;
+    letter-spacing: -0.011em;
+    overflow-x: hidden;
+    max-width: 100vw;
+    width: 100%;
+    /* Constructivist grid — the drafting paper the composition sits on. At
+       ~3.5% ink it's below the threshold of "pattern" and reads as material,
+       but it stops the canvas being a flat void behind the hard shadows,
+       which is what made the offset shadows look pasted on. `fixed` so it
+       stays put while content scrolls: a grid that scrolls with the page
+       reads as content; one that doesn't reads as the surface underneath. */
+    background-image:
+      linear-gradient(rgb(var(--ink) / 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(var(--ink) / 0.035) 1px, transparent 1px);
+    background-size: 56px 56px;
+    background-attachment: fixed;
+  }
+
+  /* Pulse swaps the drafting-paper grid for a soft ambient glow seated in the
+     accent gradient — the grid is a Bauhaus material read, glow is Pulse's. */
+  [data-theme='pulse'] body {
+    background-image:
+      radial-gradient(720px 480px at 12% -8%, rgb(var(--accent) / 0.10), transparent 60%),
+      radial-gradient(640px 420px at 100% 0%, rgb(var(--accent-2) / 0.08), transparent 60%);
+    background-attachment: fixed;
+  }
+
+  /* Cyber Obsidian has a high-tech microgrid with deep matrix aura */
+  [data-theme='cyber'] body {
+    background-image:
+      linear-gradient(rgb(var(--accent) / 0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(var(--accent) / 0.04) 1px, transparent 1px),
+      radial-gradient(800px 500px at 50% -10%, rgb(var(--accent-2) / 0.08), transparent 70%);
+    background-size: 32px 32px, 32px 32px, 100% 100%;
+    background-attachment: fixed;
+  }
+
+  ::selection {
+    background: rgb(var(--accent) / 0.18);
+  }
+
+  ::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(var(--ink) / 0.15);
+    border: 4px solid transparent;
+    background-clip: content-box;
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--ink) / 0.28);
+    background-clip: content-box;
+  }
+}
+
+@layer components {
+  /* Status is carried by a small fixed-hue dot, not a filled chip — keeps the
+     surface quiet while staying instantly scannable. */
+  .dot {
+    @apply inline-block h-[7px] w-[7px] shrink-0 rounded-full;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-line
+           px-2.5 py-[3px] text-label font-medium text-ink-soft
+           transition-transform duration-150 hover:-translate-y-[1px]
+           max-w-full text-left break-words whitespace-normal leading-snug;
+  }
+
+  /* ---- Emoji layer -------------------------------------------------------
+   * Emoji are a *personality* layer sitting alongside the drawn `Icon` set,
+   * never a replacement for it — the SVG icons stay the icon system (one
+   * stroke, one weight, accessible), and emoji only appear where a real text
+   * label is already carrying the meaning. That's the rule: an emoji here is
+   * never the only thing telling you what something is.
+   *
+   * Pinned to the colour-emoji faces explicitly, because Outfit ships some
+   * monochrome glyph coverage that would otherwise win the cascade and render
+   * these as flat outlines. `aria-hidden` at every call site.  */
+  .emoji {
+    font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji',
+      'Segoe UI Symbol', sans-serif;
+    font-style: normal;
+    font-weight: 400;
+    line-height: 1;
+    letter-spacing: normal;
+    display: inline-block;
+  }
+
+  /* ---- Live signal -------------------------------------------------------
+   * An expanding ring on a status dot, for state that is genuinely happening
+   * right now: a queued Claude run, an interview stage in play. Set --pulse
+   * inline to the status hue. Deliberately rationed — if everything pulses,
+   * nothing is live. */
+  .live-dot {
+    @apply relative rounded-full;
+    animation: theme('animation.pulse-ring');
+  }
+
+  /* ---- Hover sheen -------------------------------------------------------
+   * A raking highlight across a card on hover. Sits inside an
+   * `overflow-hidden` parent and is driven by the parent's `group` hover, so
+   * it costs nothing at rest. Transform-only — stays on the compositor. */
+  .sheen-layer {
+    @apply pointer-events-none absolute inset-y-0 -left-1/3 w-1/3 opacity-0;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgb(var(--ink) / 0.07),
+      transparent
+    );
+  }
+  .group:hover > .sheen-layer {
+    @apply opacity-100;
+    animation: theme('animation.sheen');
+  }
+
+  .field-label {
+    @apply mb-1.5 block text-micro font-medium text-ink-soft;
+  }
+
+  /* Matched to the button geometry (rounded-md, border-2) so a form row reads
+     as one built object rather than a soft input next to a hard button. */
+  .field-input {
+    @apply w-full rounded-md border-2 border-line bg-panel px-3 py-2.5 text-body text-ink
+           outline-none transition duration-150 placeholder:text-ink-faint
+           hover:bg-panel-2/40
+           focus:border-accent focus:shadow-hardAccent focus:ring-0;
+  }
+
+  /* Bauhaus buttons (DESIGN.md, 23 Aug 2026): thick border, hard offset
+     shadow, physical "press" on click — translate into the shadow's corner
+     and drop it, simulating the button meeting the page. */
+  /* The press already existed (translate into the shadow's corner and drop
+     it). What was missing was the other half of the same physical model: a
+     button that only ever sinks has one state, never a *lift*. Hover now
+     pulls the button off the page (translate away from the shadow, shadow
+     deepens hardSm -> hardMd); press still drives it flat. Three real
+     positions on one axis — raised, resting, pressed — instead of two. */
+  /* `whitespace-nowrap` + `shrink-0` on all three: none of them had either,
+     so in a flex row too narrow for its buttons (a phone-width AppCard's
+     Edit/Re-queue CV/Review row, Agenda's Done/Snooze 3d row) a button
+     shrank below its label's width and the words wrapped mid-phrase
+     ("RE-QUEUE CV" -> "RE-" / "QUEUE") instead of the row scrolling or the
+     button just staying full width. Fixed once here rather than per call
+     site — every button using these classes gets the fix. */
+  .btn-primary {
+    @apply inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-full border-2 border-line
+           bg-accent px-[18px] py-2.5 text-body font-bold uppercase tracking-wide text-on-accent
+           shadow-hardSm transition duration-150
+           hover:-translate-x-[2px] hover:-translate-y-[2px] hover:shadow-hardMd hover:brightness-105
+           active:translate-x-[2px] active:translate-y-[2px] active:shadow-none
+           focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-accent/30
+           [&>svg]:transition-transform [&>svg]:duration-200 hover:[&>svg]:scale-110
+           [&>.emoji]:transition-transform [&>.emoji]:duration-200
+           hover:[&>.emoji]:scale-125 hover:[&>.emoji]:-rotate-12;
+  }
+
+  .btn-quiet {
+    @apply inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md border-2 border-line bg-panel
+           px-4 py-2.5 text-body font-bold uppercase tracking-wide text-ink
+           shadow-hardSm transition duration-150
+           hover:-translate-x-[2px] hover:-translate-y-[2px] hover:bg-panel-2 hover:shadow-hardMd
+           active:translate-x-[2px] active:translate-y-[2px] active:shadow-none
+           focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-accent/25
+           [&>svg]:transition-transform [&>svg]:duration-200 hover:[&>svg]:scale-110
+           [&>.emoji]:transition-transform [&>.emoji]:duration-200
+           hover:[&>.emoji]:scale-125 hover:[&>.emoji]:-rotate-12;
+  }
+
+  /* The underline grows from the left rather than switching on — an inline
+     link is the one place a 120ms reveal reads as "this is reachable"
+     without adding a box. */
+  .link-quiet {
+    @apply relative inline-flex items-center gap-1.5 text-meta text-ink-soft
+           transition-colors hover:text-accent;
+  }
+  .link-quiet::after {
+    content: '';
+    @apply absolute -bottom-0.5 left-0 h-[1.5px] w-full origin-left scale-x-0 bg-accent
+           transition-transform duration-200;
+  }
+  .link-quiet:hover::after,
+  .link-quiet:focus-visible::after {
+    @apply scale-x-100;
+  }
+
+  /* Panel surfaces. `rounded-2xl border border-line` was hand-copied 29 times
+   * across 18 files, at three different background opacities for what is
+   * visually one surface. These codify it as two levels and nothing more:
+   * `.panel` for a top-level surface, `.panel-inset` for one nested inside it.
+   * A third opacity is not a decision, it's a typo — don't reintroduce one. */
+  /* Bauhaus migration, 23 Aug 2026 (second pass). DESIGN.md listed modals,
+   * Insights, Study, Outreach, Agenda and the command palette as "not yet
+   * migrated" — they inherited the new colour tokens but kept the old soft
+   * rounded-2xl/hairline shape, so the app read as two design languages
+   * depending on which tab you were on. Because those 29 call sites were
+   * already routed through these three classes, the whole remainder migrates
+   * here rather than view-by-view: binary-ish radius, doubled border, hard
+   * offset shadow on top-level surfaces.
+   *
+   * `.panel-inset` deliberately takes no shadow — a hard shadow inside a hard
+   * shadow reads as a rendering bug, not as depth. Depth is one layer deep. */
+  .panel {
+    @apply rounded-md border-2 border-line bg-panel shadow-hardSm;
+  }
+
+  .panel-inset {
+    @apply rounded-md border-2 border-line bg-panel-2/50;
+  }
+
+  /* Bento Grid Card (v6.0.0 Flight Deck) with interactive mouse spotlight */
+  .bento-card {
+    @apply relative overflow-hidden rounded-md border-2 border-line bg-panel shadow-hardSm transition-all duration-200;
+  }
+  .bento-card:hover {
+    @apply shadow-hardMd -translate-x-[2px] -translate-y-[2px];
+  }
+  .bento-spotlight {
+    pointer-events: none;
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    background: radial-gradient(
+      450px circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
+      rgb(var(--accent) / 0.08),
+      transparent 80%
+    );
+  }
+  .bento-card:hover .bento-spotlight {
+    opacity: 1;
+  }
+
+  /* Empty/placeholder states: same geometry, dashed edge to read as "nothing
+     here yet" rather than "a container that failed to fill". No shadow — an
+     empty state shouldn't sit above the page it's apologising to. */
+  .panel-empty {
+    @apply rounded-md border-2 border-dashed border-line;
+  }
+
+  .panel-header {
+    @apply mb-4 flex flex-wrap items-baseline justify-between gap-2
+           border-b-2 border-line-soft pb-3.5;
+  }
+
+  .panel-title {
+    @apply text-subhead font-medium text-ink;
+  }
+
+  /* The uppercase eyebrow above a group — sidebar headings, panel sections.
+     Bold Outfit uppercase with wide tracking as of the 23 Aug 2026 Bauhaus
+     redesign (matches the spec's own "Labels" rule) — the mono/"ops console"
+     treatment this replaced is gone; JetBrains Mono stays for terminal/path
+     content elsewhere, just not this identity role any more. */
+  .section-label {
+    @apply font-sans text-label font-bold uppercase tracking-widest text-ink-faint;
+  }
+  /* A 6px accent square set on the label's baseline — the spec's own
+     "colour block as marker" rule, applied to the one element that appears
+     above every group in the app. Adding it here rather than at 30 call
+     sites is the point: one rule, and every section in every view picks up
+     the same mark. `inline-block` + margin keeps it safe in the handful of
+     places .section-label sits inline rather than as its own block. */
+  .section-label::before {
+    content: '';
+    @apply mr-2 inline-block h-[6px] w-[6px] shrink-0 bg-accent align-[0.08em];
+  }
+
+  /* The third button tier that already existed in practice: the small pill
+     actions on a list row, hand-rolled four times in AppCard. Smaller and
+     quieter than .btn-quiet, which is a full-size form control. */
+  .btn-ghost {
+    @apply inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border-2 border-line bg-panel
+           px-3 text-micro font-bold uppercase tracking-wide text-ink-soft transition duration-150
+           hover:-translate-x-px hover:-translate-y-px hover:bg-panel-2 hover:text-ink
+           hover:shadow-hardXs
+           active:translate-x-px active:translate-y-px active:shadow-none
+           focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-accent/25
+           [&>svg]:transition-transform [&>svg]:duration-200 hover:[&>svg]:scale-110;
+  }
+
+  /* ==== Pulse theme overrides =============================================
+   * Bauhaus bakes its shape language (hard offset shadow, thick border, press
+   * translate) as static Tailwind utilities on these same classes above, not
+   * as vars — so shape/motion can't be swapped by redefining a CSS variable
+   * the way colour was. These overrides replace exactly that: softer radii,
+   * a glow shadow keyed to the gradient accent, and a lift-on-hover /
+   * settle-on-press motion instead of Bauhaus's offset-and-drop. Colour needs
+   * no repeating here — every class above already reads --accent etc, which
+   * the [data-theme='pulse'] block up top already swapped. */
+  [data-theme='pulse'] .field-input {
+    border-radius: 16px;
+    border-width: 1px;
+  }
+  [data-theme='pulse'] .field-input:focus {
+    box-shadow: 0 0 0 3px rgb(var(--accent) / 0.18);
+  }
+
+  [data-theme='pulse'] .btn-primary {
+    border-width: 0;
+    background: linear-gradient(135deg, rgb(var(--accent)), rgb(var(--accent-2)));
+    box-shadow: 0 8px 22px -8px rgb(var(--accent) / 0.5);
+    transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 240ms cubic-bezier(0.22, 1, 0.36, 1), filter 240ms;
+  }
+  [data-theme='pulse'] .btn-primary:hover {
+    transform: translateY(-2px) scale(1.015);
+    box-shadow: 0 14px 32px -8px rgb(var(--accent) / 0.6);
+  }
+  [data-theme='pulse'] .btn-primary:active {
+    transform: translateY(0) scale(0.985);
+    box-shadow: 0 4px 14px -6px rgb(var(--accent) / 0.45);
+  }
+
+  [data-theme='pulse'] .btn-quiet,
+  [data-theme='pulse'] .btn-ghost {
+    border-radius: 999px;
+    border-width: 1px;
+    box-shadow: 0 4px 14px -8px rgb(var(--shadow-hard) / 0.4);
+    transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 220ms cubic-bezier(0.22, 1, 0.36, 1), background-color 220ms;
+  }
+  [data-theme='pulse'] .btn-quiet:hover,
+  [data-theme='pulse'] .btn-ghost:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 24px -8px rgb(var(--accent) / 0.28);
+  }
+  [data-theme='pulse'] .btn-quiet:active,
+  [data-theme='pulse'] .btn-ghost:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 8px -4px rgb(var(--shadow-hard) / 0.35);
+  }
+
+  [data-theme='pulse'] .panel {
+    border-radius: 20px;
+    border-width: 1px;
+    box-shadow: 0 10px 28px -14px rgb(var(--accent) / 0.3);
+  }
+  [data-theme='pulse'] .panel-inset {
+    border-radius: 16px;
+    border-width: 1px;
+  }
+  [data-theme='pulse'] .panel-empty {
+    border-radius: 20px;
+    border-width: 1px;
+  }
+
+  /* The square marker becomes the gradient dot — same job (a colour block
+     announcing a group), Pulse's own material instead of Bauhaus's. */
+  [data-theme='pulse'] .section-label::before {
+    border-radius: 999px;
+    background: linear-gradient(135deg, rgb(var(--accent)), rgb(var(--accent-2)));
+  }
+
+  [data-theme='pulse'] .chip:hover {
+    border-color: rgb(var(--accent) / 0.4);
+  }
+
+  /* AppCard's row surface, TabStrip's active tab, and Sidebar's active-nav
+     pill hard-code Bauhaus shape inline rather than through .panel — same
+     glow/radius treatment, targeted at each call site's stable class. */
+  [data-theme='pulse'] .app-card-surface {
+    border-radius: 20px;
+    border-width: 1px;
+    box-shadow: 0 10px 26px -14px rgb(var(--accent) / 0.28);
+    transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  [data-theme='pulse'] .app-card-surface:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 18px 40px -16px rgb(var(--accent) / 0.4);
+  }
+  [data-theme='pulse'] .tab-active-pill {
+    box-shadow: 0 0 0 1px rgb(var(--accent) / 0.3), 0 6px 16px -8px rgb(var(--accent) / 0.4);
+  }
+  [data-theme='pulse'] .nav-active-pill {
+    border-radius: 999px;
+    border-width: 1px;
+    box-shadow: 0 6px 16px -8px rgb(var(--accent) / 0.35);
+  }
+
+  /* Company identity colour — a third colour category alongside accent
+   * (action) and status hues (fixed meaning): per-company hue, deterministic
+   * from the name, carrying no meaning beyond "tell this row apart from the
+   * next one at a glance". `--mono-hue` is set inline per instance. */
+  .company-mono {
+    background: hsl(var(--mono-hue) 70% 92%);
+    color: hsl(var(--mono-hue) 55% 32%);
+  }
+  .dark .company-mono {
+    background: hsl(var(--mono-hue) 32% 24%);
+    color: hsl(var(--mono-hue) 75% 78%);
+  }
+
+  /* A run with no discrete step count (single job-URL analyse) still needs a
+     "something is happening" signal — a sliding stripe, never a fabricated
+     percentage. Respects prefers-reduced-motion via the global rule below. */
+  .progress-indeterminate {
+    @apply relative overflow-hidden bg-line;
+  }
+  .progress-indeterminate::after {
+    content: '';
+    @apply absolute inset-y-0 w-1/3 rounded-full bg-accent;
+    animation: indeterminate-slide 1.2s ease-in-out infinite;
+  }
+  @keyframes indeterminate-slide {
+    0% {
+      left: -33%;
+    }
+    100% {
+      left: 100%;
+    }
+  }
+
+  /* ---- Glassmorphism Header Capsule ------------------------------------ */
+  .glass-header {
+    background: rgb(var(--panel) / 0.78);
+    backdrop-filter: blur(24px) saturate(160%);
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+    border: 1px solid rgb(var(--line) / 0.16);
+    box-shadow: 0 8px 32px -8px rgb(0 0 0 / 0.12), inset 0 1px 1px 0 rgb(255 255 255 / 0.4);
+  }
+
+  .dark .glass-header {
+    background: rgb(var(--canvas) / 0.65);
+    border-color: rgb(255 255 255 / 0.12);
+    box-shadow: 0 14px 36px -10px rgb(0 0 0 / 0.45), inset 0 1px 0 0 rgb(255 255 255 / 0.1);
+  }
+
+  /* Pulse theme: rich frosted glass with specular highlight and ambient glow */
+  [data-theme='pulse'] .glass-header {
+    background: rgb(var(--panel) / 0.7);
+    border-color: rgb(var(--accent) / 0.22);
+    box-shadow: 0 12px 36px -10px rgb(var(--accent) / 0.22), inset 0 1px 1px 0 rgb(255 255 255 / 0.45);
+  }
+
+  .dark[data-theme='pulse'] .glass-header {
+    background: rgba(24, 20, 42, 0.7);
+    border-color: rgba(255, 255, 255, 0.14);
+    box-shadow: 0 18px 45px -12px rgba(109, 60, 255, 0.35), inset 0 1px 0 0 rgba(255, 255, 255, 0.18);
+  }
+
+  /* Cyber theme: neon-etched obsidian glass */
+  [data-theme='cyber'] .glass-header {
+    background: rgb(var(--panel) / 0.75);
+    border-color: rgb(var(--accent) / 0.25);
+    box-shadow: 0 10px 30px -10px rgb(0 0 0 / 0.2), inset 0 1px 0 0 rgb(var(--accent) / 0.2);
+  }
+  .dark[data-theme='cyber'] .glass-header {
+    background: rgba(10, 15, 26, 0.75);
+    border-color: rgba(16, 185, 129, 0.2);
+    box-shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.7), inset 0 1px 0 0 rgba(16, 185, 129, 0.25), 0 0 20px -8px rgba(16, 185, 129, 0.15);
+  }
+
+  /* Cyber Theme Component Styles */
+  [data-theme='cyber'] .app-card-surface {
+    border-color: rgb(var(--line));
+    border-radius: 0.75rem;
+    transition: border-color 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .dark[data-theme='cyber'] .app-card-surface {
+    background: rgb(var(--panel));
+    border-color: rgb(var(--line));
+  }
+  [data-theme='cyber'] .app-card-surface:hover {
+    border-color: rgb(var(--accent) / 0.45);
+    box-shadow: 0 0 20px -5px rgb(var(--accent) / 0.22), 0 8px 24px -10px rgb(0 0 0 / 0.3);
+  }
+
+  [data-theme='cyber'] .btn-primary {
+    background: linear-gradient(135deg, rgb(var(--accent)), rgb(var(--accent-2)));
+    color: rgb(var(--on-accent));
+    font-weight: 600;
+    box-shadow: 0 0 16px -4px rgb(var(--accent) / 0.4);
+  }
+  [data-theme='cyber'] .btn-primary:hover {
+    box-shadow: 0 0 24px 0 rgb(var(--accent) / 0.6);
+  }
+
+  [data-theme='cyber'] .nav-active-pill {
+    background: rgb(var(--accent) / 0.15);
+    color: rgb(var(--accent));
+    border: 1px solid rgb(var(--accent) / 0.4);
+    box-shadow: 0 0 12px -3px rgb(var(--accent) / 0.35);
+  }
+
+  /* 3D Tilt Card & Specular Sheen */
+  .tilt-card-container {
+    transform-style: preserve-3d;
+    will-change: transform;
+    position: relative;
+  }
+
+  .specular-sheen {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background: radial-gradient(
+      circle 220px at var(--mouse-x, 50%) var(--mouse-y, 50%),
+      rgba(255, 255, 255, 0.12),
+      transparent 80%
+    );
+    opacity: var(--sheen-opacity, 0);
+    transition: opacity 0.25s ease;
+    z-index: 2;
+  }
+
+  .dark .specular-sheen {
+    background: radial-gradient(
+      circle 240px at var(--mouse-x, 50%) var(--mouse-y, 50%),
+      rgba(255, 255, 255, 0.08),
+      transparent 75%
+    );
+  }
+
+  /* Breathing Status Halos for High-Priority Roles */
+  @keyframes halo-breathe {
+    0%, 100% {
+      box-shadow: 0 0 16px -2px var(--halo-color, rgba(16, 185, 129, 0.35)),
+                  0 0 0 1px var(--halo-border, rgba(16, 185, 129, 0.4));
+    }
+    50% {
+      box-shadow: 0 0 28px 4px var(--halo-color, rgba(16, 185, 129, 0.6)),
+                  0 0 0 1px var(--halo-border, rgba(16, 185, 129, 0.7));
+    }
+  }
+
+  .status-halo-interview {
+    --halo-color: rgba(16, 185, 129, 0.4);
+    --halo-border: rgba(16, 185, 129, 0.5);
+    animation: halo-breathe 3.5s ease-in-out infinite;
+  }
+
+  .status-halo-gold {
+    --halo-color: rgba(234, 179, 8, 0.35);
+    --halo-border: rgba(234, 179, 8, 0.45);
+    animation: halo-breathe 3.5s ease-in-out infinite;
+  }
+
+  /* Radar Ping Wave for Imminent Deadlines */
+  .radar-ping-container {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .radar-ping-ring {
+    position: absolute;
+    inset: -4px;
+    border-radius: 9999px;
+    border: 1.5px solid var(--pulse-color, rgb(var(--rose)));
+    opacity: 0.8;
+    animation: radar-pulse 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+    pointer-events: none;
+  }
+
+  @keyframes radar-pulse {
+    0% {
+      transform: scale(0.85);
+      opacity: 0.9;
+    }
+    75%, 100% {
+      transform: scale(1.8);
+      opacity: 0;
+    }
+  }
+
+  /* Hardware Acceleration & GPU Composition */
+  .glass-header,
+  .app-card-surface,
+  .panel,
+  .nav-active-pill,
+  .tab-active-pill,
+  .tilt-card-container {
+    transform: translateZ(0);
+    backface-visibility: hidden;
+  }
+
+  /* ---- Plnty & Kott inspired Modern Minimal Utilities (v6.1.0) ---- */
+  .hp-squircle {
+    border-radius: 20px;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+  }
+  .dark .hp-squircle {
+    border: 1px solid rgba(255, 255, 255, 0.09);
+  }
+
+  /* Minimal Studio Dashboard Tile */
+  .studio-tile {
+    position: relative;
+    overflow: hidden;
+    border-radius: 24px;
+    background: rgb(var(--panel));
+    border: 1px solid rgba(var(--ink) / 0.07);
+    box-shadow: 0 4px 24px -2px rgba(0, 0, 0, 0.03), 0 1px 2px 0 rgba(0, 0, 0, 0.02);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+                box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+                border-color 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .dark .studio-tile {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 6px 28px -4px rgba(0, 0, 0, 0.35);
+  }
+  .studio-tile:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 16px 36px -6px rgba(0, 0, 0, 0.07);
+    border-color: rgba(var(--ink) / 0.14);
+  }
+  .dark .studio-tile:hover {
+    box-shadow: 0 18px 42px -6px rgba(0, 0, 0, 0.55);
+    border-color: rgba(255, 255, 255, 0.16);
+  }
+
+  /* Spotlight glow on studio tile */
+  .studio-spotlight {
+    pointer-events: none;
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    background: radial-gradient(
+      450px circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
+      rgba(var(--accent) / 0.07),
+      transparent 75%
+    );
+  }
+  .studio-tile:hover .studio-spotlight {
+    opacity: 1;
+  }
+
+  /* Vibrant Candy Pods */
+  .candy-pod {
+    border-radius: 18px;
+    border-width: 1px;
+    transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+                box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+                filter 0.2s ease;
+  }
+  .candy-pod:hover {
+    transform: translateY(-2px) scale(1.015);
+  }
+  .candy-pod:active {
+    transform: translateY(0) scale(0.99);
+  }
+
+  /* Continuous Marquee Ticker Track */
+  .ticker-marquee-track {
+    display: flex;
+    overflow: hidden;
+    user-select: none;
+    mask-image: linear-gradient(to right, transparent 0%, black 5%, black 95%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to right, transparent 0%, black 5%, black 95%, transparent 100%);
+  }
+  .ticker-marquee-run {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 1.5rem;
+    animation: marquee-glide 34s linear infinite;
+  }
+  .ticker-marquee-track:hover .ticker-marquee-run {
+    animation-play-state: paused;
+  }
+  @keyframes marquee-glide {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+  }
+
+  /* Fine noise grain */
+  .grain-overlay {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.03;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+    z-index: 40;
+  }
+}
+
+/* Native View Transitions */
+::view-transition-old(root) {
+  animation: 160ms cubic-bezier(0.4, 0, 1, 1) both vt-fade-out;
+}
+::view-transition-new(root) {
+  animation: 220ms cubic-bezier(0, 0, 0.2, 1) 30ms both vt-fade-in;
+}
+
+@keyframes vt-fade-out {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(0.996); }
+}
+
+@keyframes vt-fade-in {
+  from { opacity: 0; transform: scale(1.004); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+  .tilt-card-container {
+    transform: none !important;
+  }
+  .specular-sheen,
+  .radar-ping-ring {
+    display: none !important;
+  }
+}

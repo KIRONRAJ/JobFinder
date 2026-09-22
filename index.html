@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en-NZ">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Job Search HQ</title>
+    <script>
+      // Daily-rotating favicon: same emoji all day, changes at local midnight.
+      (function () {
+        var EMOJIS = ["💼", "🎯", "📌", "🚀", "🔍", "🧭", "📈", "🏆", "✅", "🗂️", "📋", "🔑"];
+        var today = new Date();
+        var seed = today.getFullYear() * 372 + today.getMonth() * 31 + today.getDate();
+        var emoji = EMOJIS[seed % EMOJIS.length];
+        var svg =
+          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">' +
+          '<text x="50" y="50" font-size="72" text-anchor="middle" dominant-baseline="central">' +
+          emoji +
+          "</text></svg>";
+        var link = document.createElement("link");
+        link.rel = "icon";
+        link.type = "image/svg+xml";
+        link.href = "data:image/svg+xml," + encodeURIComponent(svg);
+        document.head.appendChild(link);
+      })();
+    </script>
+    <script>
+      // Instant theme detection before first paint to prevent dark/light theme flash
+      (function () {
+        try {
+          var savedTheme = localStorage.getItem('theme_pref');
+          var isDark = savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (isDark) document.documentElement.classList.add('dark');
+          var visualTheme = localStorage.getItem('visual_theme');
+          if (visualTheme === 'pulse') document.documentElement.setAttribute('data-theme', 'pulse');
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <!--
+      THESIS: A job search is a small number of live threads, each owing you a
+      next move. This surface shows the pipeline as calm, generous rows you can
+      read at a glance, and refuses the dense dashboard-of-widgets arrangement
+      that treats six applications like six thousand.
+    -->
+    <div id="root">
+      <div id="app-splash" style="position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:system-ui,-apple-system,sans-serif;z-index:9999;user-select:none;">
+        <style>
+          #app-splash {
+            background-color: #f0f0f0;
+            color: #121212;
+          }
+          .dark #app-splash {
+            background-color: #121212;
+            color: #f0f0f0;
+          }
+          [data-theme="pulse"] #app-splash {
+            background-color: #fbf7ff;
+            color: #16131f;
+          }
+          .dark[data-theme="pulse"] #app-splash {
+            background-color: #120f1d;
+            color: #f4f1fc;
+          }
+          .splash-mark {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 16px;
+          }
+          .splash-circle {
+            width: 12px;
+            height: 12px;
+            border-radius: 9999px;
+            background: #d02020;
+            animation: splashPulse 1.2s ease-in-out infinite alternate;
+          }
+          .splash-square {
+            width: 12px;
+            height: 12px;
+            border-radius: 3px;
+            background: #0f805e;
+            animation: splashPulse 1.2s ease-in-out 0.2s infinite alternate;
+          }
+          .splash-triangle {
+            width: 12px;
+            height: 12px;
+            background: #f0c020;
+            clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
+            animation: splashPulse 1.2s ease-in-out 0.4s infinite alternate;
+          }
+          @keyframes splashPulse {
+            0% { transform: scale(0.85); opacity: 0.6; }
+            100% { transform: scale(1.18); opacity: 1; }
+          }
+          .splash-title {
+            font-size: 15px;
+            font-weight: 900;
+            letter-spacing: -0.02em;
+            text-transform: uppercase;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+          }
+          .splash-progress {
+            margin-top: 18px;
+            width: 140px;
+            height: 3px;
+            border-radius: 9999px;
+            background: rgba(128,128,128,0.18);
+            overflow: hidden;
+            position: relative;
+          }
+          .splash-bar {
+            position: absolute;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            width: 40%;
+            background: #d02020;
+            border-radius: 9999px;
+            animation: splashSlide 1.2s ease-in-out infinite;
+          }
+          [data-theme="pulse"] .splash-bar {
+            background: linear-gradient(90deg, #6d3cff, #ff3d94);
+          }
+          @keyframes splashSlide {
+            0% { left: -40%; width: 30%; }
+            50% { width: 50%; }
+            100% { left: 100%; width: 30%; }
+          }
+        </style>
+        <div class="splash-mark">
+          <div class="splash-circle"></div>
+          <div class="splash-square"></div>
+          <div class="splash-triangle"></div>
+        </div>
+        <div class="splash-title">
+          Job Search HQ
+          <span style="font-size: 14px;">🎯</span>
+        </div>
+        <div class="splash-progress">
+          <div class="splash-bar"></div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
