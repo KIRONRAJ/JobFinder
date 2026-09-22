@@ -28,41 +28,44 @@ export function ResponseTimeline({ app }: { app: Application }) {
   const min = Math.min(...timestamps, now);
   const max = Math.max(...timestamps, now + 14 * 86_400_000);
   const range = Math.max(max - min, 86_400_000);
-  const pos = (t: number) => `${Math.max(0, Math.min(100, ((t - min) / range) * 100))}%`;
-
-  const todayPos = pos(now);
 
   // Two points landing within a few days of each other map to nearly the same
   // `left`, so their labels sit on top of each other and render as garbled
   // overlapping text (e.g. a deadline and an overdue follow-up close together).
-  // Resolved points, sorted left-to-right, so a close pair can be staggered.
+  // Resolved points, sorted left-to-right, clamped within 6%-94% to prevent edge clipping
   const resolved = points
     .map((p) => {
       const t = p.kind === 'today' ? now : dateMs(p.date);
-      return t === null ? null : { ...p, t, leftPct: ((t - min) / range) * 100 };
+      return t === null ? null : { ...p, t, leftPct: Math.max(6, Math.min(94, ((t - min) / range) * 100)) };
     })
     .filter((p): p is NonNullable<typeof p> => p !== null)
     .sort((a, b) => a.leftPct - b.leftPct);
 
-  const COLLISION_THRESHOLD = 10; // percentage points
-  let lastLeft = -Infinity;
-  let stagger = false;
-  const withStagger = resolved.map((p) => {
-    const collides = p.leftPct - lastLeft < COLLISION_THRESHOLD;
-    stagger = collides ? !stagger : false;
+  // Smart alternating positioning: if two points are close to each other (< 16%),
+  // place one above the baseline and one below so they never overlap
+  const COLLISION_THRESHOLD = 16;
+  let lastPos: 'above' | 'below' = 'below';
+  let lastLeft = -999;
+  const positioned = resolved.map((p) => {
+    const isClose = p.leftPct - lastLeft < COLLISION_THRESHOLD;
+    const pos: 'above' | 'below' = isClose ? (lastPos === 'below' ? 'above' : 'below') : 'below';
+    lastPos = pos;
     lastLeft = p.leftPct;
-    return { ...p, stagger };
+    return { ...p, pos };
   });
 
   return (
-    <div className="rounded-2xl border border-line bg-panel-2/50 px-4 py-4">
-      <div className="mb-3 text-micro font-medium text-ink-soft">Response timeline</div>
-      <div className="relative h-[4.5rem]">
-        {/* Base line */}
-        <div className="absolute inset-x-0 top-6 h-px bg-line" />
-        {/* Today marker as a subtle vertical guide */}
-        <div className="absolute top-2 h-9 w-px bg-accent/40" style={{ left: todayPos }} />
-        {withStagger.map((p, i) => {
+    <div className="rounded-2xl border border-line bg-panel-2/50 px-4 py-3.5 min-w-0">
+      <div className="mb-2 text-micro font-medium text-ink-soft">Response timeline</div>
+      <div className="relative h-20 select-none">
+        {/* Base line centered vertically */}
+        <div className="absolute inset-x-0 top-10 h-px bg-line" />
+        {/* Today marker as a vertical guide */}
+        <div
+          className="absolute top-2 h-16 w-px bg-accent/30 pointer-events-none"
+          style={{ left: `${Math.max(6, Math.min(94, ((now - min) / range) * 100))}%` }}
+        />
+        {positioned.map((p, i) => {
           const left = `${p.leftPct}%`;
           const dot =
             p.kind === 'today'
@@ -72,20 +75,24 @@ export function ResponseTimeline({ app }: { app: Application }) {
                 : p.kind === 'window'
                   ? 'h-2 w-2 bg-amber'
                   : 'h-2 w-2 bg-ink-faint';
+
           return (
             <div
               key={i}
-              className="absolute top-6 -translate-x-1/2 -translate-y-1/2"
+              className="absolute top-10 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center"
               style={{ left }}
             >
-              <div className={`rounded-full ${dot}`} />
+              <div className={`rounded-full ${dot} shrink-0`} />
               <div
-                className={`-translate-x-1/2 whitespace-nowrap text-label text-ink-soft ${p.stagger ? 'mt-6' : 'mt-1.5'}`}
-                style={{ marginLeft: '50%' }}
+                className={`absolute whitespace-nowrap text-center text-label text-ink-soft ${
+                  p.pos === 'above' ? 'bottom-3 pb-1' : 'top-3 pt-1'
+                }`}
               >
-                {p.label}
-                {p.date && (
-                  <div className="tabular-nums text-ink-faint">{relative(p.date)}</div>
+                <div className="font-semibold text-ink leading-tight">{p.label}</div>
+                {p.date && p.kind !== 'today' && (
+                  <div className="tabular-nums text-micro text-ink-faint leading-tight mt-0.5">
+                    {relative(p.date)}
+                  </div>
                 )}
               </div>
             </div>

@@ -65,11 +65,11 @@
 - Tracks a bidirectional evidence map (`matched` / `gap` / `unsupported`) linking every generated claim directly back to authenticated candidate facts.
 - Includes automated verification scripts (`scripts/verify-docs.py`) validating text-layer ATS keyword presence, 2-page A4 geometry, and word-count tolerances.
 
-### 4. Summer of Tech (SOT) Career Fair Hub
-- Purpose-built tactical module for university & graduate tech recruitment events:
-  - **Company Dossiers**: Deep technical profiles on participating employers, tech stacks, and team cultures.
-  - **Strategic Talking Points**: Role-grounded elevator pitches engineered to bridge candidate backgrounds to specific employer needs.
-  - **Interactive Preparation**: Stand dossier filters, booth checklists, and elevator pitch drills with confidence scoring.
+### 4. GSAP-Animated Mission Control Dashboard
+- A dedicated home view (`src/components/dashboard/`) built as a grid of focused tiles rather than one dense page:
+  - **Mission Briefing**: Time-of-day greeting, in-flight/applied/interview KPIs, and live server + Notion sync status.
+  - **Funnel & Radar Tiles**: A live conversion funnel, an urgent-deadline radar, and an interview spotlight surfaced from the current pipeline.
+  - **Command Dock & Live Ticker**: Quick-launch actions and a scrolling feed of recent pipeline activity, animated with GSAP and respecting `prefers-reduced-motion`.
 
 ### 5. Mobile Command Center (Telegram Bot Integration)
 - 24/7 remote operations via a companion Telegram bot:
@@ -84,7 +84,12 @@
 
 ### 7. Model Context Protocol (MCP) Server
 - Implements Anthropic's open **Model Context Protocol** (`mcp-server/`):
-  - Exposes standardized tools (`fetch-applications`, `log-job`, `update-status`, `search-applications`) enabling autonomous AI agents to query and manage the pipeline safely.
+  - Exposes standardized tools (`get_today`, `get_pending`, `search_applications`, `log_job`, `update_status`) enabling autonomous AI agents to query and manage the pipeline safely, backed by an end-to-end integration test suite.
+
+### 8. Hardened Networking & Document Handling
+- **SSRF-safe URL fetching** (`server/safe-url.js`): every caller-supplied URL (job-ad scrapes, chat-based job-link ingest, the job-parse endpoint) is checked against loopback, RFC1918, CGNAT, and link-local ranges — plus the server's own hostname, resolved at runtime — before the app will fetch it.
+- **Spec-correct file downloads** (`server/content-disposition.js`): builds an RFC 6266/5987-compliant `Content-Disposition` header (ASCII fallback + UTF-8 `filename*`), so a generated CV/cover-letter filename containing any non-Latin-1 character never 500s the in-browser preview.
+- **ASCII-safe filename generation**: the tailored-document generator whitelists letters, digits, spaces, and hyphens for every filename it writes, so a company name or role title with punctuation can't produce a file an external upload portal rejects.
 
 ---
 
@@ -154,4 +159,4 @@ The built-in **Insights** engine tracks:
 ## 📄 License & Attribution
 
 This project is open-source under the [MIT License](LICENSE).  
-Designed and engineered by **Kironraj Odatt Peringode**.
+Designed and engineered by **Jordan Smith**.

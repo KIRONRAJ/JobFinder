@@ -8,7 +8,7 @@ import type { UpskillReport } from '../types';
  * `/eod` (aggregated `learningTasks` across every application, ranked by
  * recurrence) and nothing in the app ever read it back. Same fetch-on-mount,
  * render-nothing-if-absent shape as LearningLoopReportPanel, since both
- * answer the same underlying question: what should Kironraj go learn.
+ * answer the same underlying question: what should Jordan go learn.
  */
 export function UpskillReportPanel() {
   const [report, setReport] = useState<UpskillReport | null | undefined>(undefined);

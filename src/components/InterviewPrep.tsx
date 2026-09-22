@@ -3,14 +3,14 @@ import type { Application, RoleType } from '../types';
 
 /**
  * Shown only once a role reaches Interview. The talking points are drawn from
- * Kironraj's real, confirmed background (Candidate Key Facts.md) — nothing
+ * Jordan's real, confirmed background (Candidate Key Facts.md) — nothing
  * here is invented, and anything role-specific he adds lives in his notes.
  */
 const TALKING_POINTS = [
-  "Master's in Cyber Security, Whitecliffe College, Wellington — completed July 2026",
+  "Master's in Cyber Security, Riverside Institute of Technology, Wellington — completed July 2026",
   'Master’s research: Replay Attack Prevention in Smart Car IoT Systems (hybrid nonce + counter defence)',
   '~4 years Linux/Windows server and network experience',
-  'Genuine 24/7 rotating-shift NOC experience (L2 NOC Engineer, Keralavision Broadband)',
+  'Genuine 24/7 rotating-shift NOC experience (L2 NOC Engineer, Northline Broadband)',
   'Full, clean NZ driver’s licence',
   '3-year Post Study Work Visa granted — full open work rights, no sponsorship needed',
 ];

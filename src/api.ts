@@ -4,6 +4,7 @@ import type {
   AssessmentOutcome,
   AssessmentStore,
   AuditEvent,
+  EventItem,
   EventStore,
   FolderStatus,
   InterviewBank,
@@ -12,6 +13,7 @@ import type {
   LearningLoopReport,
   OutreachEmailKind,
   OutreachEntry,
+  ServerLogLine,
   StudyData,
   StudyGuideProgress,
   UpskillReport,
@@ -33,7 +35,6 @@ export interface PendingRequest {
     | 'delete_request'
     | 'outreach_email_request'
     | 'analysis_request'
-    | 'review_request'
     | 'unknown';
   role: string;
   company: string;
@@ -183,17 +184,20 @@ export const api = {
       method: 'POST',
     }),
 
-  /** On-demand reviewer critique (v2.6) — used to run automatically on every
-   *  generation; now it's a button, for when a draft actually looks doubtful.
-   *  The mechanical checks it partly duplicated run every time regardless, in
+  /** On-demand reviewer critique (v2.6; live-spawn since v2.7) — used to run
+   *  automatically on every generation; now it's a button, for when a draft
+   *  actually looks doubtful. Spawns immediately (no request-file queue) and
+   *  hands back a runId so the caller can watch it live via
+   *  /api/claude/stream/:runId, same mechanism as the terminal panel. The
+   *  mechanical checks it partly duplicated run every time regardless, in
    *  scripts/verify-docs.py. */
   requestReview: (id: string, note?: string) =>
-    request<{ ok: true; queued: string; entry: Application }>(`/api/review-request/${id}`, {
+    request<{ ok: true; runId: string; entry: Application }>(`/api/review-request/${id}`, {
       method: 'POST',
       body: JSON.stringify({ note: note || '' }),
     }),
 
-  // The Express server now runs on servo (Linux), a different machine from
+  // The Express server may run on a different machine from
   // the browser, so it can't launch Explorer on the client PC — that has to
   // happen client-side via a registered `openfolder://` protocol handler
   // (see Required Documents/README or ask Claude for the Windows setup).
@@ -234,6 +238,9 @@ export const api = {
     }>('/api/generic-docs'),
 
   auditLog: (limit = 200) => request<AuditEvent[]>(`/api/audit-log?limit=${limit}`),
+
+  /** Settings → Server log. Bounded by journald rotation, not by this limit. */
+  serverLog: (lines = 500) => request<ServerLogLine[]>(`/api/server-log?lines=${lines}`),
 
   learningLoop: () => request<LearningLoopReport | null>('/api/learning-loop'),
 
@@ -295,6 +302,11 @@ export const api = {
   /** Standalone calendar events (not tied to a job application). */
   events: {
     get: () => request<EventStore>('/api/events'),
+    update: (id: string, patch: Partial<EventItem>) =>
+      request<EventStore>(`/api/events/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      }),
   },
 
   /**
@@ -362,7 +374,7 @@ export const api = {
     emails: (id: string) =>
       request<{ items: OutreachEmailDraft[] }>(`/api/outreach/${id}/emails`),
 
-    /** Records that Kironraj sent it himself — this app never sends mail. */
+    /** Records that Jordan sent it himself — this app never sends mail. */
     markSent: (id: string, emailKind: OutreachEmailKind, sentOn?: string) =>
       request<OutreachEntry>(`/api/outreach/${id}/mark-sent`, {
         method: 'POST',

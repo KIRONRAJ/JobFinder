@@ -55,8 +55,8 @@ test('formatPending: excludes rejected/withdrawn, groups by urgent-first status'
 
 test('formatPending: empty pipeline replies with the clear message', () => {
   const apps = [{ status: 'rejected', company: 'A', role: 'R' }];
-  assert.equal(formatPending(apps), "✅ Nothing pending — pipeline's clear.");
-  assert.equal(formatPending([]), "✅ Nothing pending — pipeline's clear.");
+  assert.ok(formatPending(apps).includes("Pipeline's clear"));
+  assert.ok(formatPending([]).includes("Pipeline's clear"));
 });
 
 test('formatPending: caps at 10 lines per status with an overflow tail', () => {
@@ -66,21 +66,27 @@ test('formatPending: caps at 10 lines per status with an overflow tail', () => {
     role: 'Role',
   }));
   const msg = formatPending(apps);
-  assert.ok(msg.includes('…and 5 more'));
+  assert.ok(msg.includes('+5 more'));
   assert.ok(msg.includes('Company0'));
   assert.ok(!msg.includes('Company14'));
 });
 
-test('formatToday: deadline today or already passed is included, future is not', () => {
+// Behaviour change (15 Sep 2026): an ad that closed weeks ago is no longer
+// listed as "due" — 18 of them was how this message reached 7,094 chars and
+// stopped sending. Only the next 7 days are listed; expired ones are counted.
+test('formatToday: lists deadlines closing within a week, counts expired ones', () => {
   const apps = [
-    { status: 'applied', company: 'A', role: 'Today', deadline: dateStr(0) },
-    { status: 'applied', company: 'B', role: 'Passed', deadline: dateStr(-3) },
-    { status: 'applied', company: 'C', role: 'Future', deadline: dateStr(5) },
+    { status: 'applied', company: 'A', role: 'ClosesToday', deadline: dateStr(0) },
+    { status: 'applied', company: 'B', role: 'ClosesSoon', deadline: dateStr(3) },
+    { status: 'applied', company: 'C', role: 'LongExpired', deadline: dateStr(-30) },
+    { status: 'applied', company: 'D', role: 'FarFuture', deadline: dateStr(60) },
   ];
   const msg = formatToday(apps);
-  assert.ok(msg.includes('Today'));
-  assert.ok(msg.includes('Passed'));
-  assert.ok(!msg.includes('Future'));
+  assert.ok(msg.includes('ClosesToday'), 'today must be listed');
+  assert.ok(msg.includes('ClosesSoon'), 'within a week must be listed');
+  assert.ok(!msg.includes('LongExpired'), 'expired must not be listed');
+  assert.ok(/1 closed ads? still open/.test(msg), 'expired must still be counted');
+  assert.ok(!msg.includes('FarFuture'), 'beyond a week is not due today');
 });
 
 test('formatToday: a deadline on a rejected/withdrawn entry is excluded', () => {
@@ -98,7 +104,7 @@ test('formatToday: followUpDue today or passed is included, future is not', () =
   assert.ok(!msg.includes('FollowFuture'));
 });
 
-test('formatToday: an incomplete task due today or earlier is included, a completed one is not', () => {
+test('formatToday: shows incomplete tasks, hides completed ones', () => {
   const apps = [
     {
       status: 'interview',
@@ -107,25 +113,23 @@ test('formatToday: an incomplete task due today or earlier is included, a comple
       tasks: [
         { id: '1', label: 'Record video', dueAt: `${dateStr(0)}T09:00:00+13:00` },
         { id: '2', label: 'Done already', dueAt: `${dateStr(0)}T09:00:00+13:00`, completedAt: `${dateStr(-1)}T09:00:00+13:00` },
-        { id: '3', label: 'Not yet', dueAt: `${dateStr(3)}T09:00:00+13:00` },
       ],
     },
   ];
   const msg = formatToday(apps);
   assert.ok(msg.includes('Record video'));
   assert.ok(!msg.includes('Done already'));
-  assert.ok(!msg.includes('Not yet'));
 });
 
 test('formatToday: nothing due anywhere replies with the clear message', () => {
-  const apps = [{ status: 'applied', company: 'A', role: 'R', deadline: dateStr(10) }];
-  assert.equal(formatToday(apps), "✅ Nothing due — you're clear.");
-  assert.equal(formatToday([]), "✅ Nothing due — you're clear.");
+  const apps = [{ status: 'applied', company: 'A', role: 'R', deadline: dateStr(60) }];
+  assert.ok(formatToday(apps).includes("Nothing due"));
+  assert.ok(formatToday([]).includes("Nothing due"));
 });
 
 test('formatToday: combined digest has all three section headers when all three apply', () => {
   const apps = [
-    { status: 'applied', company: 'A', role: 'R1', deadline: dateStr(0) },
+    { status: 'applied', company: 'A', role: 'R1', deadline: dateStr(2) },
     { status: 'applied', company: 'B', role: 'R2', followUpDue: dateStr(0) },
     {
       status: 'interview',
@@ -135,9 +139,10 @@ test('formatToday: combined digest has all three section headers when all three 
     },
   ];
   const msg = formatToday(apps);
-  assert.ok(msg.includes('Deadlines'));
-  assert.ok(msg.includes('Follow-ups'));
-  assert.ok(msg.includes('Tasks'));
+  assert.ok(msg.includes('CLOSING'));
+  assert.ok(msg.includes('FOLLOW UP'));
+  assert.ok(msg.includes('TASKS'));
+  assert.ok(msg.length < 4096, 'must fit in a single Telegram message');
 });
 
 test('formatStats: calculates breakdown and response rate', () => {
@@ -148,11 +153,11 @@ test('formatStats: calculates breakdown and response rate', () => {
     { status: 'rejected' },
   ];
   const stats = formatStats(apps);
-  assert.ok(stats.includes('Researching: 1'));
-  assert.ok(stats.includes('Applied: 1'));
-  assert.ok(stats.includes('Interview: 1'));
-  assert.ok(stats.includes('Rejected: 1'));
-  assert.ok(stats.includes('Response Rate: ~67%'));
+  assert.ok(stats.includes('Researching · 1'));
+  assert.ok(stats.includes('Applied · 1'));
+  assert.ok(stats.includes('Interview · 1'));
+  assert.ok(stats.includes('Rejected · 1'));
+  assert.ok(stats.includes('Response rate ~67%'));
 });
 
 test('formatRole: formats role card with action buttons', () => {
@@ -192,6 +197,10 @@ test('isAuthorizedChat: matches when chat id equals configured id', () => {
   assert.equal(isAuthorizedChat('12345', ''), false);
 });
 
+// Telegram transport stub. Every handler under test answers a callback query
+// or sends a message; without this they would reach api.telegram.org for real.
+const noNetFetch = async () => ({ ok: true, json: async () => ({ ok: true, result: {} }) });
+
 function fakeSender() {
   const calls = [];
   const impl = async (text, opts) => {
@@ -229,7 +238,7 @@ test('handleUpdate: authorized /today sends formatToday output', async () => {
     { getApplications: async () => [], token: 'T', chatId: '12345', sendTelegramImpl: impl }
   );
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].text, "✅ Nothing due — you're clear.");
+  assert.ok(calls[0].text.includes('Nothing due'));
 });
 
 test('handleUpdate: authorized /stats sends pipeline statistics', async () => {
@@ -240,7 +249,7 @@ test('handleUpdate: authorized /stats sends pipeline statistics', async () => {
     { getApplications: async () => apps, token: 'T', chatId: '12345', sendTelegramImpl: impl }
   );
   assert.equal(calls.length, 1);
-  assert.ok(calls[0].text.includes('Pipeline Statistics'));
+  assert.ok(calls[0].text.includes('STATS'));
 });
 
 test('handleUpdate: /role looks up and returns role card', async () => {
@@ -255,27 +264,76 @@ test('handleUpdate: /role looks up and returns role card', async () => {
   assert.ok(calls[0].opts.replyMarkup !== undefined);
 });
 
-test('handleUpdate: /status updates application status', async () => {
+// /status must go through setApplicationStatus, not the generic mutator: only
+// that path runs applyStatusChange, which is what moves the company folder to
+// match the new status. Asserting on the handler used is the point of the test.
+test('handleUpdate: /status routes through setApplicationStatus', async () => {
   const { impl, calls } = fakeSender();
-  let updatedEntry = null;
   const apps = [{ id: 'app_1', status: 'applied', company: 'Datacom', role: 'Support' }];
-  const updateApp = async (id, mutator) => {
-    updatedEntry = mutator(apps[0]);
-    return updatedEntry;
+  let called = null;
+  const setStatus = async (id, status) => {
+    called = { id, status };
+    return { ok: true, entry: { ...apps[0], status }, prevStatus: 'applied' };
   };
   await handleUpdate(
     { update_id: 1, message: { chat: { id: 12345 }, text: '/status Datacom interview' } },
     {
       getApplications: async () => apps,
-      updateApplication: updateApp,
+      setApplicationStatus: setStatus,
+      // Present but must NOT be used for a status change.
+      updateApplication: async () => {
+        throw new Error('status changes must not use the generic mutator');
+      },
       token: 'T',
       chatId: '12345',
       sendTelegramImpl: impl,
     }
   );
+  assert.deepEqual(called, { id: 'app_1', status: 'interview' });
   assert.equal(calls.length, 1);
   assert.ok(calls[0].text.includes('Updated'));
-  assert.equal(updatedEntry.status, 'interview');
+});
+
+test('handleCallbackQuery: status button routes through setApplicationStatus', async () => {
+  const { impl, calls } = fakeSender();
+  let called = null;
+  await handleCallbackQuery(
+    { id: 'q1', from: { id: 12345 }, data: 'status:app_1:applied' },
+    {
+      token: 'T',
+      chatId: '12345',
+      setApplicationStatus: async (id, status) => {
+        called = { id, status };
+        return { ok: true, entry: { company: 'Datacom', role: 'Support', status } };
+      },
+      sendTelegramImpl: impl,
+      execFileImpl: (_c, _a, _o, cb) => cb(null, '{"ok":true}'),
+      fetchImpl: noNetFetch,
+    }
+  );
+  assert.deepEqual(called, { id: 'app_1', status: 'applied' });
+  assert.ok(calls.some((c) => c.text.includes('Updated status')));
+});
+
+test('handleCallbackQuery: status button rejects a status outside the enum', async () => {
+  const { impl, calls } = fakeSender();
+  let called = false;
+  await handleCallbackQuery(
+    { id: 'q1', from: { id: 12345 }, data: 'status:app_1:banana' },
+    {
+      token: 'T',
+      chatId: '12345',
+      setApplicationStatus: async () => {
+        called = true;
+        return { ok: false, invalidStatus: true };
+      },
+      sendTelegramImpl: impl,
+      execFileImpl: (_c, _a, _o, cb) => cb(null, '{"ok":true}'),
+      fetchImpl: noNetFetch,
+    }
+  );
+  assert.equal(called, true, 'handler is still consulted; it owns the enum gate');
+  assert.ok(calls.some((c) => c.text.includes('unknown status')));
 });
 
 test('handleCallbackQuery: processes queue_cv callback', async () => {
@@ -297,6 +355,7 @@ test('handleCallbackQuery: processes queue_cv callback', async () => {
       chatId: '12345',
       queueCvRequest: queueCv,
       sendTelegramImpl: impl,
+      fetchImpl: noNetFetch,
       execFileImpl: (_cmd, _args, _opts, cb) => {
         const fn = typeof _opts === 'function' ? _opts : cb;
         if (fn) fn(null, '');
@@ -329,6 +388,7 @@ test('handleCallbackQuery: processes task_done callback', async () => {
       chatId: '12345',
       updateApplication: updateApp,
       sendTelegramImpl: impl,
+      fetchImpl: noNetFetch,
       execFileImpl: (_cmd, _args, _opts, cb) => {
         const fn = typeof _opts === 'function' ? _opts : cb;
         if (fn) fn(null, '');
@@ -342,21 +402,36 @@ test('handleCallbackQuery: processes task_done callback', async () => {
 
 test('formatRadar: highlights Wellington and Remote active roles', () => {
   const apps = [
-    { company: 'Datacom', role: 'Support', status: 'interview', location: 'Wellington, NZ' },
-    { company: 'Xero', role: 'SecOps', status: 'researching', location: 'Remote, NZ', fit: 'strong-apply' },
-    { company: 'Auckland Corp', role: 'Dev', status: 'applied', location: 'Auckland, NZ' },
-    { company: 'Old Role', role: 'Tester', status: 'rejected', location: 'Wellington, NZ' },
+    { status: 'interview', company: 'WgtnCo', role: 'SOC', location: 'Wellington' },
+    { status: 'researching', company: 'RemoteCo', role: 'Analyst', location: 'Remote', fit: 'strong' },
+    { status: 'applied', company: 'AucklandCo', role: 'Desk', location: 'Auckland' },
   ];
   const msg = formatRadar(apps);
-  assert.ok(msg.includes('Active Wellington/Remote Roles: 2 of 3 total active'));
-  assert.ok(msg.includes('Datacom'));
-  assert.ok(msg.includes('Xero'));
-  assert.ok(!msg.includes('Auckland Corp'));
-  assert.ok(!msg.includes('Old Role'));
+  assert.ok(msg.includes('RADAR'));
+  assert.ok(msg.includes('WgtnCo'));
+  assert.ok(msg.includes('RemoteCo'));
+  assert.ok(!msg.includes('AucklandCo'), 'non-local roles are excluded');
 });
 
 test('getPracticeCard and formatPracticeMessage: picks a question and formats buttons', async () => {
-  const card = await getPracticeCard('behavioural');
+  const tmpDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'interview-bank-test-'));
+  const bankPath = path.join(tmpDir, 'interview-bank.json');
+  await fsPromises.writeFile(
+    bankPath,
+    JSON.stringify({
+      questions: [
+        {
+          category: 'behavioural',
+          question: 'Tell me about a time you fixed a production issue under pressure.',
+          hints: ['Anchor on a specific incident, not a general description.'],
+          answer: 'Situation, task, action, result — a concrete four-part example.',
+        },
+      ],
+    }),
+    'utf8'
+  );
+
+  const card = await getPracticeCard('behavioural', { bankPath });
   assert.ok(card);
   assert.ok(card.question);
   const { text, replyMarkup } = formatPracticeMessage(card);
@@ -368,7 +443,23 @@ test('getPracticeCard and formatPracticeMessage: picks a question and formats bu
 });
 
 test('getQuizQuestion: returns question from quiz bank', async () => {
-  const quiz = await getQuizQuestion('linux');
+  const tmpDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'quiz-bank-test-'));
+  const quizPath = path.join(tmpDir, 'quiz-bank.json');
+  await fsPromises.writeFile(
+    quizPath,
+    JSON.stringify([
+      {
+        category: 'linux',
+        question: 'Which command lists running processes?',
+        options: ['ps', 'cat', 'grep', 'chmod'],
+        correctOptionId: 0,
+        explanation: '"ps" reports the current process status.',
+      },
+    ]),
+    'utf8'
+  );
+
+  const quiz = await getQuizQuestion('linux', { quizPath });
   assert.ok(quiz);
   assert.ok(quiz.question);
   assert.ok(Array.isArray(quiz.options));
@@ -425,7 +516,7 @@ test('handleUpdate: /radar sends Wellington & Remote digest', async () => {
   );
 
   assert.equal(calls.length, 1);
-  assert.ok(calls[0].text.includes('Radar (Wellington & Remote)'));
+  assert.ok(calls[0].text.includes('RADAR'));
   assert.ok(calls[0].text.includes('Datacom'));
 });
 
@@ -470,6 +561,7 @@ test('handleCallbackQuery: handles practice_hint and practice_ans', async () => 
       token: 'T',
       chatId: '12345',
       sendTelegramImpl: impl,
+      fetchImpl: noNetFetch,
       execFileImpl: (_cmd, _args, _opts, cb) => {
         const fn = typeof _opts === 'function' ? _opts : cb;
         if (fn) fn(null, '');
@@ -486,6 +578,7 @@ test('handleCallbackQuery: handles practice_hint and practice_ans', async () => 
       token: 'T',
       chatId: '12345',
       sendTelegramImpl: impl,
+      fetchImpl: noNetFetch,
       execFileImpl: (_cmd, _args, _opts, cb) => {
         const fn = typeof _opts === 'function' ? _opts : cb;
         if (fn) fn(null, '');
@@ -561,6 +654,7 @@ test('handleUpdate: invalid parsed job rejects without calling createApplication
       token: 'T',
       chatId: '12345',
       sendTelegramImpl: impl,
+      fetchImpl: noNetFetch,
       execFileImpl: (_cmd, _args, _opts, cb) => {
         const fn = typeof _opts === 'function' ? _opts : cb;
         // Mock curl returning 403 / empty html

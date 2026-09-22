@@ -7,6 +7,9 @@ import fsSync from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { generateContent } from './ai-models.js';
+import { isFetchableUrl } from './safe-url.js';
+import { telegramApi, telegramGetUpdates } from './telegram-api.js';
 import {
   sendTelegram,
   sendTelegramDocument,
@@ -26,7 +29,7 @@ export function getDashboardUrl() {
       }
     }
   }
-  return 'http://servo:5178';
+  return 'http://localhost:5178';
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -40,29 +43,38 @@ const DEFAULT_KEY_FACTS_FILE = path.join(CAREER_DIR, 'Project Notes', 'Candidate
 const VOICE_NOTES_DIR = path.join(APP_DIR, 'data', 'voice-notes');
 
 export const COMMAND_HELP = [
-  '🤖 Job Search HQ Telegram Operating System:',
-  '⏰ /today — What is due today (deadlines, follow-ups, tasks)',
-  '📋 /pending — Active pipeline grouped by status',
-  '📨 /gmail [count] — Sweep last 10 emails (or specified count) for tracker updates',
-  '🔍 /role <name> — Detailed role card, fit & recruiter notes',
-  '📄 /cv <name> — Send tailored CV PDF straight to chat',
-  '📝 /cl <name> — Copy-paste plain text Cover Letter on iPhone',
-  '🎯 /practice [category] — STAR story drill & flashcards',
-  '🧠 /quiz — Interactive Telegram technical quiz poll',
-  '💡 /ask <question> — Pocket AI Career Coach (grounded in facts)',
-  '📭 /reject <company> [reason] — Mark rejected & update Learning Loop',
-  '🔄 /status <name> <status> — Update role status',
-  '🎤 /prep <name> — Role prep & tailored talking points',
-  '🗒️ /note <name> <text> — Add note to an application',
-  '📥 /log <company> — <role> [url] — Manually log a new role',
-  '🛰️ /radar — Wellington & Remote active opportunity radar',
-  '📊 /stats — Pipeline breakdown & response rates',
-  '🔄 /sync — Git sync tracker data & CVs between server and GitHub',
-  '📱 /app — Quick link to mobile web dashboard',
-  '❓ /help — Show all commands',
+  '🤖 JOB SEARCH HQ',
   '',
-  '🎙️ Voice Debrief: Speak a voice memo into this chat after an interview to get instant transcription, extracted questions, and notes logged!',
-  '🔗 Job Ingest: Paste any SEEK, LinkedIn, or Trade Me link here to capture it instantly!',
+  '📅 DAILY',
+  '   ⏰ /today · what is due now',
+  '   📋 /pending · active pipeline',
+  '   🛰 /radar · Wgtn & remote',
+  '   📊 /stats · numbers',
+  '',
+  '🔍 A ROLE',
+  '   🔎 /role <name> · full card',
+  '   📄 /cv <name> · send CV PDF',
+  '   📝 /cl <name> · cover letter text',
+  '   🎤 /prep <name> · talking points',
+  '',
+  '✏️ LOGGING',
+  '   📥 /log <Co> — <Role> [url]',
+  '   🔄 /status <name> <status>',
+  '   📭 /reject <name> [reason]',
+  '   🗒 /note <name> <text>',
+  '',
+  '🧠 PRACTICE',
+  '   🎯 /practice · STAR flashcards',
+  '   ❓ /quiz · technical quiz',
+  '   💡 /ask <question> · career coach',
+  '',
+  '⚙️ SYSTEM',
+  '   📨 /gmail [n] · sweep inbox',
+  '   🔄 /sync · push to GitHub',
+  '   📱 /app · open dashboard',
+  '',
+  '🎙 Send a voice memo after an interview for an instant debrief.',
+  '🔗 Paste any job link to capture it.',
 ].join('\n');
 
 export const MAIN_MENU_KEYBOARD = {
@@ -99,23 +111,16 @@ export const STATUS_SHORTCUTS = {
 
 export function formatPending(apps) {
   const pending = apps.filter((a) => a.status !== 'rejected' && a.status !== 'withdrawn');
-  if (pending.length === 0) return "✅ Nothing pending — pipeline's clear.";
+  if (pending.length === 0) return "📋 PIPELINE\n\n✅ Nothing pending. Pipeline's clear.";
 
-  const lines = [];
+  const out = [`📋 PIPELINE · ${pending.length} active`];
   for (const status of PENDING_STATUS_ORDER) {
     const group = pending.filter((a) => a.status === status);
     if (group.length === 0) continue;
-    lines.push(`${PENDING_STATUS_LABELS[status]} (${group.length})`);
-    const shown = group.slice(0, PENDING_CAP_PER_STATUS);
-    for (const app of shown) {
-      lines.push(`  • ${app.company} — ${app.role}`);
-    }
-    if (group.length > shown.length) {
-      lines.push(`  …and ${group.length - shown.length} more`);
-    }
-    lines.push('');
+    out.push('', `${PENDING_STATUS_LABELS[status]} · ${group.length}`);
+    out.push(...bullets(group.map((a) => `• ${pair(a)}`), PENDING_CAP_PER_STATUS));
   }
-  return lines.join('\n').trim();
+  return out.join('\n');
 }
 
 function todayDateString() {
@@ -132,105 +137,226 @@ function isDueTodayOrEarlier(dateStr) {
   return dateOnly(dateStr) <= todayDateString();
 }
 
+// ---------- phone-readable formatting helpers ----------
+
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** Whole days from today to `dateStr`. Negative = in the past. */
+function daysAway(dateStr) {
+  const d = dateOnly(dateStr);
+  if (!d) return null;
+  const then = new Date(`${d}T00:00:00`);
+  if (Number.isNaN(then.getTime())) return null;
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  return Math.round((then.getTime() - now.getTime()) / 86_400_000);
+}
+
+/** "today", "tomorrow", "Fri", "in 12d", "3d ago" — whichever reads shortest. */
+function whenLabel(dateStr) {
+  const n = daysAway(dateStr);
+  if (n === null) return '';
+  if (n === 0) return 'today';
+  if (n === 1) return 'tomorrow';
+  if (n === -1) return 'yesterday';
+  if (n < 0) return `${-n}d ago`;
+  if (n <= 6) return DAYS[new Date(`${dateOnly(dateStr)}T00:00:00`).getDay()];
+  return `in ${n}d`;
+}
+
+function shortDate(dateStr) {
+  const d = dateOnly(dateStr);
+  if (!d) return '';
+  const dt = new Date(`${d}T00:00:00`);
+  if (Number.isNaN(dt.getTime())) return d;
+  return `${dt.getDate()} ${MONTHS[dt.getMonth()]}`;
+}
+
+/** Long employer names blow the line width on a phone. */
+function clip(text, max = 34) {
+  const s = String(text ?? '').trim();
+  if (s.length <= max) return s;
+  return `${s.slice(0, max - 1).trimEnd()}…`;
+}
+
+/** "Company — Role", both clipped, for a one-line list item. */
+function pair(app, coMax = 30, roleMax = 34) {
+  return `${clip(app.company, coMax)} · ${clip(app.role, roleMax)}`;
+}
+
+/**
+ * Render a capped bullet list with an overflow tail. Keeping the cap low is
+ * the whole point — these are read on a phone, and /today was 7,094 characters
+ * before this, past Telegram's own 4,096 limit.
+ */
+function bullets(items, cap, moreHint = '') {
+  const lines = items.slice(0, cap).map((t) => `   ${t}`);
+  const extra = items.length - cap;
+  if (extra > 0) lines.push(`   ⋯ +${extra} more${moreHint ? ` · ${moreHint}` : ''}`);
+  return lines;
+}
+
 export function formatToday(apps) {
-  const deadlines = apps.filter(
-    (a) =>
-      a.deadline &&
-      isDueTodayOrEarlier(a.deadline) &&
-      a.status !== 'rejected' &&
-      a.status !== 'withdrawn'
-  );
-  const followUps = apps.filter((a) => a.followUpDue && isDueTodayOrEarlier(a.followUpDue));
-  const taskItems = [];
-  for (const app of apps) {
+  const live = apps.filter((a) => a.status !== 'rejected' && a.status !== 'withdrawn');
+
+  // Split deadlines by urgency instead of lumping every past date into one
+  // list. The old version used "due today or earlier", so an ad that closed in
+  // mid-August still showed as due — 18 of them, which is how this message
+  // reached 7,094 characters and stopped sending at all.
+  const closing = [];
+  const expired = [];
+  for (const a of live) {
+    if (!a.deadline) continue;
+    const n = daysAway(a.deadline);
+    if (n === null) continue;
+    if (n < 0) expired.push(a);
+    else if (n <= 7) closing.push({ app: a, n });
+  }
+  closing.sort((x, y) => x.n - y.n);
+
+  const followUps = live
+    .filter((a) => a.followUpDue && isDueTodayOrEarlier(a.followUpDue))
+    .map((a) => ({ app: a, n: daysAway(a.followUpDue) ?? 0 }))
+    .sort((x, y) => x.n - y.n);
+
+  const tasks = [];
+  for (const app of live) {
     for (const task of app.tasks ?? []) {
-      if (!task.completedAt && isDueTodayOrEarlier(task.dueAt)) {
-        taskItems.push({ app, task });
-      }
+      if (!task.completedAt && task.dueAt) tasks.push({ app, task, n: daysAway(task.dueAt) ?? 0 });
     }
   }
+  tasks.sort((x, y) => x.n - y.n);
 
-  if (deadlines.length === 0 && followUps.length === 0 && taskItems.length === 0) {
-    return "✅ Nothing due — you're clear.";
+  const now = new Date();
+  const head = `⏰ TODAY · ${DAYS[now.getDay()]} ${now.getDate()} ${MONTHS[now.getMonth()]}`;
+
+  if (closing.length === 0 && followUps.length === 0 && tasks.length === 0) {
+    const tail = expired.length ? `\n\n🗄 ${expired.length} closed ads still open in the tracker` : '';
+    return `${head}\n\n✅ Nothing due. You're clear.${tail}`;
   }
 
-  const sections = [];
-  if (deadlines.length > 0) {
-    sections.push(
-      [
-        '⏰ Deadlines',
-        ...deadlines.map((a) => `  • ${a.company} — ${a.role} (closes ${a.deadline})`),
-      ].join('\n')
+  const out = [head];
+
+  if (tasks.length) {
+    out.push('', `📌 TASKS · ${tasks.length}`);
+    out.push(
+      ...bullets(
+        tasks.map(({ app, task, n }) => `${n < 0 ? '🔴' : '🟡'} ${clip(task.label, 42)}\n      ${clip(app.company, 24)} · ${whenLabel(task.dueAt)}`),
+        4
+      )
     );
   }
-  if (followUps.length > 0) {
-    sections.push(
-      ['📞 Follow-ups', ...followUps.map((a) => `  • ${a.company} — ${a.role}`)].join('\n')
+
+  if (closing.length) {
+    const today = closing.filter((c) => c.n === 0);
+    out.push('', `📅 CLOSING · ${closing.length}`);
+    out.push(
+      ...bullets(
+        closing.map(({ app, n }) => `${n === 0 ? '🔴' : n <= 2 ? '🟠' : '🟡'} ${pair(app)} · ${whenLabel(app.deadline)}`),
+        5
+      )
+    );
+    if (today.length) out.push(`   ⚠️ ${today.length} close TODAY`);
+  }
+
+  if (followUps.length) {
+    out.push('', `📮 FOLLOW UP · ${followUps.length}`);
+    out.push(
+      ...bullets(
+        followUps.map(({ app, n }) => `${n <= -14 ? '🔴' : n <= -7 ? '🟠' : '🟡'} ${pair(app)} · ${whenLabel(app.followUpDue)}`),
+        5,
+        '/pending'
+      )
     );
   }
-  if (taskItems.length > 0) {
-    sections.push(
-      [
-        '📋 Tasks',
-        ...taskItems.map(({ app, task }) => `  • ${task.label} — ${app.company}`),
-      ].join('\n')
-    );
-  }
-  return sections.join('\n\n');
+
+  if (expired.length) out.push('', `🗄 ${expired.length} closed ads still open in the tracker`);
+
+  return out.join('\n');
 }
 
 export function formatStats(apps) {
-  const counts = {
-    researching: 0,
-    applied: 0,
-    interview: 0,
-    offer: 0,
-    rejected: 0,
-    withdrawn: 0,
-  };
-  for (const app of apps) {
-    if (counts[app.status] !== undefined) {
-      counts[app.status] += 1;
-    }
-  }
+  const counts = { researching: 0, applied: 0, interview: 0, offer: 0, rejected: 0, withdrawn: 0 };
+  for (const app of apps) if (counts[app.status] !== undefined) counts[app.status] += 1;
 
   const active = counts.researching + counts.applied + counts.interview + counts.offer;
   const closed = counts.rejected + counts.withdrawn;
-  const total = apps.length;
-
   const responses = counts.interview + counts.offer + counts.rejected;
-  const responseRate = counts.applied + responses > 0 ? Math.round((responses / (counts.applied + responses)) * 100) : 0;
+  const denom = counts.applied + responses;
+  const responseRate = denom > 0 ? Math.round((responses / denom) * 100) : 0;
+  const interviewRate = denom > 0 ? Math.round(((counts.interview + counts.offer) / denom) * 100) : 0;
+
+  // Bar is proportional to the biggest bucket, so it stays readable whatever
+  // the totals are. Telegram's default font isn't monospaced, so no attempt is
+  // made to column-align the numbers — that would only look ragged.
+  const max = Math.max(...Object.values(counts), 1);
+  const bar = (n) => '▓'.repeat(Math.round((n / max) * 12));
+
+  const rows = [
+    ['🔍 Researching', counts.researching],
+    ['📨 Applied', counts.applied],
+    ['🟢 Interview', counts.interview],
+    ['🎉 Offer', counts.offer],
+    ['📭 Rejected', counts.rejected],
+    ['📁 Withdrawn', counts.withdrawn],
+  ];
 
   return [
-    '📊 Pipeline Statistics:',
-    `  • 🔍 Researching: ${counts.researching}`,
-    `  • 📨 Applied: ${counts.applied}`,
-    `  • 🟢 Interview: ${counts.interview}`,
-    `  • 🎉 Offer: ${counts.offer}`,
-    `  • 📭 Rejected: ${counts.rejected}`,
-    `  • 📁 Withdrawn: ${counts.withdrawn}`,
+    `📊 STATS · ${apps.length} roles`,
     '',
-    `⚡ Active Pipeline: ${active} | Closed: ${closed} | Total: ${total}`,
-    `📈 Response Rate: ~${responseRate}%`,
+    ...rows.map(([label, n]) => `${label} · ${n}${n ? `  ${bar(n)}` : ''}`),
+    '',
+    `⚡ Active ${active} · Closed ${closed}`,
+    `📈 Response rate ~${responseRate}%`,
+    `🎯 Interview rate ~${interviewRate}%`,
   ].join('\n');
 }
 
 export function formatRole(app) {
-  const statusEmoji = PENDING_STATUS_LABELS[app.status] || app.status;
-  const lines = [
-    `🏢 ${app.company}`,
-    `💼 ${app.role}`,
-    `📍 ${app.location || 'Wellington, NZ'} · ${app.employmentType || 'Full-time'}`,
-    `🔄 Status: ${statusEmoji}`,
-  ];
+  const status = PENDING_STATUS_LABELS[app.status] || app.status;
+  const out = [`🏢 ${app.company}`, `💼 ${app.role}`, ''];
 
-  if (app.fit) lines.push(`🎯 Fit: ${app.fit}`);
-  if (app.dateApplied) lines.push(`📅 Applied: ${app.dateApplied}`);
-  if (app.deadline) lines.push(`⏰ Deadline: ${app.deadline}`);
-  if (app.followUpDue) lines.push(`📞 Follow-up Due: ${app.followUpDue}`);
-  if (app.salary) lines.push(`💰 Salary: ${app.salary}`);
-  if (app.folderPath) lines.push(`📁 Folder: ${app.folderPath}`);
-  if (app.notes) lines.push(`📝 Notes: ${app.notes}`);
+  out.push(`${status}${app.fit ? ` · 🎯 ${app.fit} fit` : ''}`);
+  out.push(`📍 ${app.location || 'Wellington, NZ'} · ${app.employment === 'internship' ? 'Internship' : 'Job'}`);
+
+  // Dates block — only the ones that exist, each with a relative hint so the
+  // reader doesn't have to work out "is 2026-09-18 soon?" on a phone.
+  const dates = [];
+  if (app.date) dates.push(`📅 Applied ${shortDate(app.date)}`);
+  if (app.deadline) dates.push(`⏳ Closes ${shortDate(app.deadline)} · ${whenLabel(app.deadline)}`);
+  if (app.followUpDue) dates.push(`📮 Follow up ${whenLabel(app.followUpDue)}`);
+  if (app.interview?.when) dates.push(`🎤 Interview ${shortDate(app.interview.when)}`);
+  if (dates.length) out.push('', ...dates);
+
+  const extras = [];
+  if (app.salary) extras.push(`💰 ${app.salary}`);
+  if (app.contactName) extras.push(`👤 ${app.contactName}`);
+  if (app.contactEmail) extras.push(`✉️ ${app.contactEmail}`);
+  if (app.cvStatus) extras.push(`📄 CV ${app.cvStatus}`);
+  if (extras.length) out.push('', ...extras);
+
+  const openTasks = (app.tasks ?? []).filter((t) => !t.completedAt);
+  if (openTasks.length) {
+    out.push('', `📌 Tasks · ${openTasks.length}`);
+    out.push(...bullets(openTasks.map((t) => `• ${clip(t.label, 40)}${t.dueAt ? ` · ${whenLabel(t.dueAt)}` : ''}`), 3));
+  }
+
+  // Notes grow without bound (voice debriefs append up to 1000 chars each),
+  // so only the most recent slice is worth putting in a chat card.
+  if (app.notes) {
+    const n = String(app.notes).trim();
+    if (n.length <= 320) {
+      out.push('', `📝 ${n}`);
+    } else {
+      // Take the tail (newest content) but start it at a word boundary —
+      // slicing blind lands mid-word and reads like corruption.
+      let tail = n.slice(-320);
+      const cut = tail.search(/[\n.!?]\s|\s/);
+      if (cut > -1 && cut < 60) tail = tail.slice(cut).replace(/^[\n.!?\s]+/, '');
+      out.push('', `📝 …${tail}`);
+    }
+  }
 
   const replyMarkup = {
     inline_keyboard: [
@@ -245,75 +371,71 @@ export function formatRole(app) {
     ],
   };
 
-  return { text: lines.join('\n'), replyMarkup };
+  return { text: out.join('\n'), replyMarkup };
 }
 
 export function formatPrep(app) {
-  const lines = [`🎤 Interview Prep: ${app.company} — ${app.role}`];
+  const out = [`🎤 PREP · ${app.company}`, `💼 ${app.role}`];
 
-  if (app.interview && typeof app.interview === 'object') {
-    if (app.interview.rounds && app.interview.rounds.length > 0) {
-      lines.push('\n🗓️ Rounds:');
-      for (const r of app.interview.rounds) {
-        lines.push(`  • ${r.label || r.title}: ${r.date || 'TBD'} (${r.status || 'scheduled'})`);
-      }
+  const iv = app.interview;
+  if (iv && typeof iv === 'object') {
+    if (iv.when) out.push('', `📅 ${shortDate(iv.when)} · ${whenLabel(iv.when)}`);
+    if (Array.isArray(iv.rounds) && iv.rounds.length) {
+      out.push('', `🗓 ROUNDS · ${iv.rounds.length}`);
+      out.push(
+        ...bullets(
+          iv.rounds.map((r) => `• ${clip(r.label || r.title || 'Round', 32)} · ${r.date || 'TBD'}`),
+          4
+        )
+      );
     }
-    if (app.interview.talkingPoints && app.interview.talkingPoints.length > 0) {
-      lines.push('\n💡 Key Talking Points:');
-      for (const p of app.interview.talkingPoints.slice(0, 5)) {
-        lines.push(`  • ${p}`);
-      }
+    if (Array.isArray(iv.talkingPoints) && iv.talkingPoints.length) {
+      out.push('', `💡 TALKING POINTS · ${iv.talkingPoints.length}`);
+      out.push(...bullets(iv.talkingPoints.map((t) => `• ${clip(t, 90)}`), 5));
     }
-    if (app.interview.questions && app.interview.questions.length > 0) {
-      lines.push('\n❓ Likely Questions:');
-      for (const q of app.interview.questions.slice(0, 4)) {
-        lines.push(`  • ${q.question || q}`);
-      }
+    if (Array.isArray(iv.questions) && iv.questions.length) {
+      out.push('', `❓ LIKELY QUESTIONS · ${iv.questions.length}`);
+      out.push(...bullets(iv.questions.map((q) => `• ${clip(q.question || q, 90)}`), 4));
     }
-  } else if (app.analysis && typeof app.analysis === 'object') {
-    lines.push('\n🎯 Fit Analysis:');
-    if (app.analysis.verdict) lines.push(`Verdict: ${app.analysis.verdict}`);
-    if (app.analysis.targetMatches) lines.push(`Matches: ${app.analysis.targetMatches.join(', ')}`);
-    if (app.analysis.gaps) lines.push(`Gaps to Bridge: ${app.analysis.gaps.join(', ')}`);
-  } else {
-    lines.push('\nℹ️ No interview prep generated yet for this role.');
-    lines.push('Use "Create CV" or generate war room prep on PC.');
+    return out.join('\n');
   }
 
-  return lines.join('\n');
+  // No war-room prep written yet — fall back to whatever the fit analysis
+  // found, which is at least grounded in the ad.
+  const an = app.analysis;
+  if (an && typeof an === 'object') {
+    out.push('', '🎯 FIT ANALYSIS');
+    if (an.verdict) out.push(`   ${clip(an.verdict, 140)}`);
+    const matched = asArray(an.targetMatches ?? an.ats?.matched);
+    const gaps = asArray(an.gaps ?? an.ats?.unsupported);
+    if (matched.length) {
+      out.push('', `✅ STRENGTHS · ${matched.length}`);
+      out.push(...bullets(matched.map((m) => `• ${clip(m, 60)}`), 5));
+    }
+    if (gaps.length) {
+      out.push('', `⚠️ GAPS · ${gaps.length}`);
+      out.push(...bullets(gaps.map((g) => `• ${clip(g, 60)}`), 5));
+    }
+    return out.join('\n');
+  }
+
+  out.push('', 'ℹ️ No prep written for this role yet.', '💡 Generate the war room on the dashboard, or try /ask.');
+  return out.join('\n');
+}
+
+/** `analysis` list fields must be arrays but have shipped as bare strings
+ *  before, which blanked the role page twice — coerce rather than trust. */
+function asArray(v) {
+  if (Array.isArray(v)) return v.filter(Boolean);
+  if (typeof v === 'string' && v.trim()) return [v.trim()];
+  return [];
 }
 
 export async function sendTelegramChunked(
   text,
   { token, chatId, replyMarkup, sendTelegramImpl = sendTelegram } = {}
 ) {
-  if (text.length <= 3800) {
-    await sendTelegramImpl(text, { token, chatId, replyMarkup });
-    return;
-  }
-
-  const paragraphs = text.split('\n\n');
-  let currentChunk = '';
-  const chunks = [];
-
-  for (const para of paragraphs) {
-    if ((currentChunk + '\n\n' + para).length > 3800) {
-      if (currentChunk) chunks.push(currentChunk.trim());
-      currentChunk = para;
-    } else {
-      currentChunk = currentChunk ? currentChunk + '\n\n' + para : para;
-    }
-  }
-  if (currentChunk) chunks.push(currentChunk.trim());
-
-  for (let i = 0; i < chunks.length; i++) {
-    const isLast = i === chunks.length - 1;
-    await sendTelegramImpl(chunks[i], {
-      token,
-      chatId,
-      replyMarkup: isLast ? replyMarkup : undefined,
-    });
-  }
+  await sendTelegramImpl(text, { token, chatId, replyMarkup });
 }
 
 export async function findCoverLetterText(
@@ -480,7 +602,7 @@ export async function askCareerCoach(
   try {
     factsText = await fsPromises.readFile(candidateFactsPath, 'utf8');
   } catch {
-    factsText = 'Candidate: Kironraj Odatt Peringode. Master of Information Technology (Cyber Security), Whitecliffe College (graduated July 2026). Experience: L2 NOC Engineer at Keralavision Broadband (2 years, 24/7 rota, ISP leased line & customer support), Server Support Engineer at Poornam Info Vision / Bobcares (Linux/Windows servers, cPanel, Apache, live chat). Certs: RHCSA, Google Cybersecurity Certificate, ServiceNow learning path in progress. 3-year NZ Open Work Visa (valid to Aug 2029). Clean NZ driver licence.';
+    factsText = 'Candidate: Jordan Smith. Master of Information Technology (Cyber Security), Riverside Institute of Technology (graduated July 2026). Experience: L2 NOC Engineer at Northline Broadband (2 years, 24/7 rota, ISP leased line & customer support), Server Support Engineer at Cascade Info Vision / Bobcares (Linux/Windows servers, cPanel, Apache, live chat). Certs: RHCSA, Google Cybersecurity Certificate, ServiceNow learning path in progress. 3-year NZ Open Work Visa (valid to Aug 2029). Clean NZ driver licence.';
   }
 
   const activeRoles = (apps || [])
@@ -490,7 +612,7 @@ export async function askCareerCoach(
     .join(', ');
 
   const systemContext = [
-    'You are the personal AI Career Coach and Executive Assistant for Kironraj Odatt Peringode.',
+    'You are the personal AI Career Coach and Executive Assistant for Jordan Smith.',
     'Ground all answers strictly in his real facts, NZ job market dynamics, and his authentic background:',
     '--- CANDIDATE FACTS ---',
     factsText.slice(0, 4000),
@@ -501,31 +623,15 @@ export async function askCareerCoach(
     'Do not hallucinate skills he does not have. Frame any experience gaps honestly with transferable strength.',
   ].join('\n\n');
 
-  if (apiKey) {
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
-      const payload = {
-        contents: [
-          {
-            parts: [{ text: `${systemContext}\n\nUser Question:\n${question}` }],
-          },
-        ],
-        generationConfig: {
-          maxOutputTokens: 800,
-          temperature: 0.7,
-        },
-      };
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const data = await response.json();
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (text && text.trim()) return text.trim();
-    } catch (err) {
-      console.error('telegram ask: gemini API failed:', err.message);
-    }
+  try {
+    const { text } = await generateContent({
+      parts: [{ text: `${systemContext}\n\nUser Question:\n${question}` }],
+      generationConfig: { maxOutputTokens: 800, temperature: 0.7 },
+      apiKey,
+    });
+    if (text.trim()) return text.trim();
+  } catch (err) {
+    console.error('telegram ask: gemini failed, falling back to claude CLI:', err.message);
   }
 
   // Fallback to claude CLI
@@ -565,7 +671,7 @@ export async function debriefVoiceMemo(
     const base64Audio = audioBytes.toString('base64');
 
     const promptText = [
-      'You are an executive assistant for Kironraj Odatt Peringode.',
+      'You are an executive assistant for Jordan Smith.',
       'Transcribe this voice memo (which is a post-interview debrief or job search audio note) and synthesize it.',
       'Format your output clearly with markdown:',
       '🎙️ **Voice Debrief Summary**',
@@ -578,34 +684,14 @@ export async function debriefVoiceMemo(
       'Keep it structured, punchy, and mobile-friendly.',
     ].join('\n');
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
-    const payload = {
-      contents: [
-        {
-          parts: [
-            { text: promptText },
-            {
-              inline_data: {
-                mime_type: 'audio/ogg',
-                data: base64Audio,
-              },
-            },
-          ],
-        },
+    const { text: resultText } = await generateContent({
+      parts: [
+        { text: promptText },
+        { inline_data: { mime_type: 'audio/ogg', data: base64Audio } },
       ],
-      generationConfig: {
-        maxOutputTokens: 1000,
-        temperature: 0.3,
-      },
-    };
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      generationConfig: { maxOutputTokens: 1000, temperature: 0.3 },
+      apiKey,
     });
-    const data = await response.json();
-    const resultText = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!resultText) {
       return {
@@ -637,55 +723,36 @@ export async function debriefVoiceMemo(
 }
 
 export function formatRadar(apps) {
-  const activeRoles = apps.filter(
+  const active = apps.filter(
     (a) => a.status === 'interview' || a.status === 'researching' || a.status === 'applied'
   );
-
-  const wellingtonOrRemote = activeRoles.filter((a) => {
+  const local = active.filter((a) => {
     const loc = (a.location || '').toLowerCase();
-    return (
-      loc.includes('wellington') ||
-      loc.includes('remote') ||
-      loc.includes('hybrid') ||
-      loc.includes('upper hutt') ||
-      loc.includes('lower hutt') ||
-      loc.includes('porirua')
+    return ['wellington', 'remote', 'hybrid', 'upper hutt', 'lower hutt', 'porirua'].some((k) =>
+      loc.includes(k)
     );
   });
 
-  const lines = [
-    '🛰️ Job Search HQ Radar (Wellington & Remote)',
-    `Active Wellington/Remote Roles: ${wellingtonOrRemote.length} of ${activeRoles.length} total active`,
-    '',
-  ];
+  const out = [`🛰 RADAR · ${local.length} of ${active.length} active are Wgtn/Remote`];
 
-  const interviews = wellingtonOrRemote.filter((a) => a.status === 'interview');
-  if (interviews.length > 0) {
-    lines.push('🟢 IN PROGRESS / INTERVIEWS:');
-    for (const a of interviews) {
-      lines.push(`  • ${a.company} — ${a.role} [${a.location || 'Wellington'}]`);
-    }
-    lines.push('');
+  const interviews = local.filter((a) => a.status === 'interview');
+  if (interviews.length) {
+    out.push('', `🟢 IN PROGRESS · ${interviews.length}`);
+    out.push(...bullets(interviews.map((a) => `• ${pair(a)}`), 5));
   }
 
-  const researching = wellingtonOrRemote.filter((a) => a.status === 'researching');
-  if (researching.length > 0) {
-    lines.push('🔍 RESEARCHING / READY TO QUEUE:');
-    for (const a of researching.slice(0, 6)) {
-      lines.push(`  • ${a.company} — ${a.role} (Fit: ${a.fit || 'Good'})`);
-    }
-    if (researching.length > 6) {
-      lines.push(`  …and ${researching.length - 6} more in researching`);
-    }
-    lines.push('');
+  const researching = local.filter((a) => a.status === 'researching');
+  if (researching.length) {
+    out.push('', `🔍 READY TO QUEUE · ${researching.length}`);
+    out.push(...bullets(researching.map((a) => `• ${pair(a)} · 🎯 ${a.fit || 'good'}`), 5));
   }
 
-  lines.push('💡 Quick Actions:');
-  lines.push('• Send /cl <company> to grab cover letter text');
-  lines.push('• Send /prep <company> for talking points');
-  lines.push('• Send /practice or /quiz to sharpen skills');
+  if (interviews.length === 0 && researching.length === 0) {
+    out.push('', '💤 Nothing in progress or researching locally.');
+  }
 
-  return lines.join('\n').trim();
+  out.push('', '💡 /cv · /prep · /practice · /quiz');
+  return out.join('\n');
 }
 
 export function isAuthorizedChat(chatId, configuredChatId) {
@@ -852,29 +919,15 @@ export async function parseJobWithGemini(html, url, apiKey = process.env.GEMINI_
       .trim()
       .slice(0, 4000);
 
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
-    const payload = {
-      contents: [
+    const { text: rawJson } = await generateContent({
+      parts: [
         {
-          parts: [
-            {
-              text: `Extract the hiring company name, job role title, and job location from this job ad text. Return ONLY valid JSON with keys "company", "role", and "location". Do not wrap in markdown or backticks.\n\nText:\n${cleanText}`,
-            },
-          ],
+          text: `Extract the hiring company name, job role title, and job location from this job ad text. Return ONLY valid JSON with keys "company", "role", and "location". Do not wrap in markdown or backticks.\n\nText:\n${cleanText}`,
         },
       ],
-      generationConfig: {
-        responseMimeType: 'application/json',
-        temperature: 0.1,
-      },
-    };
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      generationConfig: { responseMimeType: 'application/json', temperature: 0.1 },
+      apiKey,
     });
-    const data = await response.json();
-    const rawJson = data.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!rawJson) return null;
     const parsed = JSON.parse(rawJson);
     return {
@@ -923,6 +976,12 @@ export async function parseJobFromUrl(url, execFileImplOrOpts = execFile, maybeO
   const apiKey = opts.apiKey || process.env.GEMINI_API_KEY;
 
   const cleanedUrl = cleanJobUrl(url);
+
+  // Same public-internet-only rule as the CV worker's scrape — a pasted link
+  // must not be able to make the server fetch its own API or a tailnet host.
+  if (!isFetchableUrl(url)) {
+    return { role: '', company: '', location: 'Wellington, NZ', url: cleanedUrl, fit: 'good' };
+  }
 
   return new Promise((resolve) => {
     execFileImpl(
@@ -992,21 +1051,10 @@ export async function parseJobFromUrl(url, execFileImplOrOpts = execFile, maybeO
   });
 }
 
-export function answerCallbackQuery(token, queryId, text = '', execFileImpl = execFile) {
-  return new Promise((resolve) => {
-    const args = [
-      '-s',
-      '--max-time',
-      '10',
-      `https://api.telegram.org/bot${token}/answerCallbackQuery`,
-      '-d',
-      `callback_query_id=${encodeURIComponent(queryId)}`,
-    ];
-    if (text) {
-      args.push('-d', `text=${encodeURIComponent(text)}`);
-    }
-    execFileImpl('curl', args, { timeout: 15000 }, () => resolve());
-  });
+export async function answerCallbackQuery(token, queryId, text = '', fetchImpl) {
+  const params = { callback_query_id: queryId };
+  if (text) params.text = text;
+  await telegramApi('answerCallbackQuery', params, { token, fetchImpl, label: 'answerCallbackQuery' });
 }
 
 export async function handleCallbackQuery(
@@ -1016,19 +1064,21 @@ export async function handleCallbackQuery(
     chatId,
     getApplications,
     updateApplication,
+    setApplicationStatus,
     queueCvRequest,
     deleteApplication,
     findCvFile,
     sendTelegramImpl = sendTelegram,
     sendDocImpl = sendTelegramDocument,
     execFileImpl = execFile,
+    fetchImpl,
   } = {}
 ) {
   const fromId = query.from?.id;
   if (!isAuthorizedChat(fromId, chatId)) return;
 
   const data = query.data || '';
-  await answerCallbackQuery(token, query.id, 'Processing…', execFileImpl);
+  await answerCallbackQuery(token, query.id, 'Processing…', fetchImpl);
 
   const [action, ...args] = data.split(':');
   const targetId = args[0];
@@ -1040,16 +1090,17 @@ export async function handleCallbackQuery(
     } else {
       await sendTelegramImpl('❌ Could not queue CV (role not found).', { token, chatId });
     }
-  } else if (action === 'status' && updateApplication) {
-    const newStatus = args[1];
-    const updated = await updateApplication(
-      targetId,
-      (entry) => ({ ...entry, status: newStatus, updated: Date.now() }),
-      'status',
-      `Status changed to ${newStatus}`
-    );
-    if (updated) {
-      await sendTelegramImpl(`🔄 Updated status for ${updated.company} to ${newStatus}.`, { token, chatId });
+  } else if (action === 'status' && setApplicationStatus) {
+    // Routed through the server's own status handler so the folder relocation,
+    // statusHistory entry and enum check all happen — the generic mutator this
+    // used to call did none of them.
+    const res = await setApplicationStatus(targetId, args[1]);
+    if (res?.ok) {
+      await sendTelegramImpl(`🔄 Updated status for ${res.entry.company} to ${args[1]}.`, { token, chatId });
+    } else if (res?.invalidStatus) {
+      await sendTelegramImpl(`❌ Ignored unknown status "${args[1]}".`, { token, chatId });
+    } else {
+      await sendTelegramImpl('❌ Could not update status (role not found).', { token, chatId });
     }
   } else if (action === 'followup_done' && updateApplication) {
     const updated = await updateApplication(
@@ -1108,7 +1159,7 @@ export async function handleCallbackQuery(
         caption: `📄 CV for ${doc.entry.company} — ${doc.entry.role}`,
         token,
         chatId,
-        execFileImpl,
+        fetchImpl,
       });
     } else {
       await sendTelegramImpl('❌ No CV PDF document found on disk yet for this role.', { token, chatId });
@@ -1183,7 +1234,7 @@ export async function handleCallbackQuery(
         quiz.options,
         quiz.correctOptionId,
         quiz.explanation,
-        { token, execFileImpl }
+        { token, fetchImpl }
       );
     }
   }
@@ -1228,10 +1279,22 @@ export async function runGitSync({ careerDir = CAREER_DIR, execFileImpl = execFi
     committed = true;
   }
 
-  // 3. Pull with rebase from origin main
+  // 3. Pull with rebase from origin main.
+  //
+  // A failed rebase leaves the working tree mid-rebase — detached, with
+  // conflict markers in files — and the CV worker and API keep writing into it.
+  // Abort before returning so the repo is left exactly as it was found; a
+  // conflict needs a human at a keyboard, not a retry from a chat message.
   const pullRes = await runGit(['pull', '--rebase', 'origin', 'main']);
   if (!pullRes.ok) {
-    return { ok: false, error: `Failed to pull from origin/main: ${pullRes.stderr || pullRes.error}` };
+    const abortRes = await runGit(['rebase', '--abort']);
+    const state = abortRes.ok
+      ? 'The rebase was aborted, so the repo is back how it was.'
+      : 'WARNING: could not abort the rebase — the repo may be mid-rebase, fix it on the server.';
+    return {
+      ok: false,
+      error: `Failed to pull from origin/main: ${pullRes.stderr || pullRes.error}\n\n${state}`,
+    };
   }
 
   // 4. Push to origin main
@@ -1253,6 +1316,7 @@ export async function handleUpdate(
   {
     getApplications,
     updateApplication,
+    setApplicationStatus,
     createApplication,
     deleteApplication,
     queueCvRequest,
@@ -1265,6 +1329,7 @@ export async function handleUpdate(
     sendTelegramImpl = sendTelegram,
     sendDocImpl = sendTelegramDocument,
     execFileImpl = execFile,
+    fetchImpl,
     learningLoopFile = DEFAULT_LEARNING_LOOP_FILE,
   } = {}
 ) {
@@ -1274,6 +1339,7 @@ export async function handleUpdate(
       chatId,
       getApplications,
       updateApplication,
+      setApplicationStatus,
       createApplication,
       deleteApplication,
       queueCvRequest,
@@ -1281,6 +1347,7 @@ export async function handleUpdate(
       sendTelegramImpl,
       sendDocImpl,
       execFileImpl,
+      fetchImpl,
     });
   }
 
@@ -1361,7 +1428,7 @@ export async function handleUpdate(
     await sendTelegramImpl('🎙️ Received voice memo! Downloading audio…', { token, chatId });
     await fsPromises.mkdir(VOICE_NOTES_DIR, { recursive: true }).catch(() => {});
     const voicePath = path.join(VOICE_NOTES_DIR, `voice_${Date.now()}.ogg`);
-    const dl = await downloadTelegramFile(message.voice.file_id, voicePath, { token, execFileImpl });
+    const dl = await downloadTelegramFile(message.voice.file_id, voicePath, { token, fetchImpl });
     if (!dl.ok) {
       await sendTelegramImpl(`❌ Failed to download voice file: ${dl.error}`, { token, chatId });
       return;
@@ -1626,17 +1693,17 @@ export async function handleUpdate(
       quiz.options,
       quiz.correctOptionId,
       quiz.explanation,
-      { token, execFileImpl }
+      { token, fetchImpl }
     );
   } else if (cmd === '/ask') {
     if (!param) {
       await sendTelegramImpl(
-        'Usage: /ask <career or interview question>\nExample: /ask How should I explain why I left Keralavision?',
+        'Usage: /ask <career or interview question>\nExample: /ask How should I explain why I left Northline?',
         { token, chatId }
       );
       return;
     }
-    await sendTelegramImpl('🤔 Consulting Career Coach for Kironraj…', { token, chatId });
+    await sendTelegramImpl('🤔 Consulting Career Coach for Jordan…', { token, chatId });
     const answer = await askCareerCoach(param, { apps, execFileImpl });
     await sendTelegramChunked(answer, { token, chatId, replyMarkup: MAIN_MENU_KEYBOARD, sendTelegramImpl });
   } else if (cmd === '/cl' || cmd === '/coverletter') {
@@ -1793,7 +1860,7 @@ export async function handleUpdate(
           caption: `📄 CV for ${app.company} — ${app.role}`,
           token,
           chatId,
-          execFileImpl,
+          fetchImpl,
         });
       } else {
         await sendTelegramImpl(`❌ No CV document found on disk yet for ${app.company}.`, { token, chatId });
@@ -1823,15 +1890,15 @@ export async function handleUpdate(
       return;
     }
 
-    if (updateApplication) {
-      const updated = await updateApplication(
-        app.id,
-        (entry) => ({ ...entry, status: normalizedStatus, updated: Date.now() }),
-        'status',
-        `Status changed to ${normalizedStatus} via Telegram`
-      );
-      if (updated) {
-        await sendTelegramImpl(`✅ Updated ${updated.company} — ${updated.role} to ${normalizedStatus}!`, { token, chatId });
+    if (setApplicationStatus) {
+      const res = await setApplicationStatus(app.id, normalizedStatus);
+      if (res?.ok) {
+        await sendTelegramImpl(
+          `✅ Updated ${res.entry.company} — ${res.entry.role} to ${normalizedStatus}!`,
+          { token, chatId }
+        );
+      } else {
+        await sendTelegramImpl(`❌ Could not update ${app.company}.`, { token, chatId });
       }
     }
   } else if (cmd === '/note') {
@@ -1868,40 +1935,14 @@ export async function handleUpdate(
   }
 }
 
-function fetchUpdates(token, offset, execFileImpl = execFile, timeoutSec = 30) {
-  return new Promise((resolve) => {
-    const offsetParam = typeof offset === 'number' ? `&offset=${offset}` : '';
-    const url = `https://api.telegram.org/bot${token}/getUpdates?timeout=${timeoutSec}${offsetParam}`;
-    execFileImpl(
-      'curl',
-      ['-s', '--max-time', String(timeoutSec + 5), url],
-      { timeout: (timeoutSec + 10) * 1000 },
-      (err, stdout) => {
-        if (err) {
-          console.error('telegram commands: getUpdates failed:', err.message);
-          resolve({ ok: false, result: [] });
-          return;
-        }
-        try {
-          const parsed = JSON.parse(stdout);
-          if (!parsed.ok) {
-            console.error('telegram commands: getUpdates error:', parsed.description || 'unknown error');
-            resolve({ ok: false, result: [] });
-            return;
-          }
-          resolve(parsed);
-        } catch {
-          console.error('telegram commands: could not parse getUpdates response');
-          resolve({ ok: false, result: [] });
-        }
-      }
-    );
-  });
+function fetchUpdates(token, offset, fetchImpl, timeoutSec = 30) {
+  return telegramGetUpdates({ offset, timeoutSec }, { token, fetchImpl });
 }
 
-function setMyCommands(token, execFileImpl = execFile) {
-  return new Promise((resolve) => {
-    const commands = JSON.stringify({
+function setMyCommands(token, fetchImpl) {
+  return telegramApi(
+    'setMyCommands',
+    {
       commands: [
         { command: 'today', description: 'What is due today' },
         { command: 'pending', description: 'Active applications in pipeline' },
@@ -1921,52 +1962,23 @@ function setMyCommands(token, execFileImpl = execFile) {
         { command: 'app', description: 'Open mobile web dashboard' },
         { command: 'help', description: 'Show all available commands' },
       ],
-    });
-    execFileImpl(
-      'curl',
-      [
-        '-s',
-        '--max-time',
-        '10',
-        `https://api.telegram.org/bot${token}/setMyCommands`,
-        '-H',
-        'Content-Type: application/json',
-        '-d',
-        commands,
-      ],
-      { timeout: 15000 },
-      (err) => {
-        if (err) console.error('telegram commands: setMyCommands failed:', err.message);
-        resolve();
-      }
-    );
-  });
+    },
+    { token, fetchImpl, label: 'setMyCommands' }
+  );
 }
 
-export function setChatMenuButton(token, execFileImpl = execFile) {
-  return new Promise((resolve) => {
-    execFileImpl(
-      'curl',
-      [
-        '-s',
-        '--max-time',
-        '10',
-        `https://api.telegram.org/bot${token}/setChatMenuButton`,
-        '-d',
-        `menu_button=${encodeURIComponent(JSON.stringify({ type: 'commands' }))}`,
-      ],
-      { timeout: 15000 },
-      (err) => {
-        if (err) console.error('telegram commands: setChatMenuButton failed:', err.message);
-        resolve();
-      }
-    );
-  });
+export function setChatMenuButton(token, fetchImpl) {
+  return telegramApi(
+    'setChatMenuButton',
+    { menu_button: { type: 'commands' } },
+    { token, fetchImpl, label: 'setChatMenuButton' }
+  );
 }
 
 export function startTelegramCommands({
   getApplications,
   updateApplication,
+  setApplicationStatus,
   createApplication,
   deleteApplication,
   queueCvRequest,
@@ -1976,26 +1988,27 @@ export function startTelegramCommands({
   token = process.env.TELEGRAM_BOT_TOKEN,
   chatId = process.env.TELEGRAM_CHAT_ID,
   execFileImpl = execFile,
+  fetchImpl,
 } = {}) {
   if (!token || !chatId) {
     console.log('  telegram commands: off (no TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID in App/.env)');
     return;
   }
 
-  setMyCommands(token, execFileImpl);
-  setChatMenuButton(token, execFileImpl);
+  setMyCommands(token, fetchImpl);
+  setChatMenuButton(token, fetchImpl);
 
   (async () => {
     let offset;
 
-    const initial = await fetchUpdates(token, undefined, execFileImpl, 0);
+    const initial = await fetchUpdates(token, undefined, fetchImpl, 0);
     if (initial.result.length > 0) {
       offset = initial.result[initial.result.length - 1].update_id + 1;
     }
     console.log('  telegram commands: on');
 
     for (;;) {
-      const { ok, result } = await fetchUpdates(token, offset, execFileImpl);
+      const { ok, result } = await fetchUpdates(token, offset, fetchImpl);
       if (!ok) {
         // eslint-disable-next-line no-await-in-loop -- deliberate backoff
         await new Promise((resolve) => setTimeout(resolve, 3000));
@@ -2008,6 +2021,7 @@ export function startTelegramCommands({
           await handleUpdate(update, {
             getApplications,
             updateApplication,
+            setApplicationStatus,
             createApplication,
             deleteApplication,
             queueCvRequest,
@@ -2017,6 +2031,7 @@ export function startTelegramCommands({
             token,
             chatId,
             execFileImpl,
+            fetchImpl,
           });
         } catch (err) {
           console.error('telegram commands: failed to handle update:', err.message);

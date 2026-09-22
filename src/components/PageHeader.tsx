@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, type CSSProperties } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { gsap, useGSAP, prefersReducedMotion } from '../lib/gsapSetup';
 import { Icon } from './Icons';
@@ -13,6 +13,8 @@ interface Props {
   onGmailFetch: () => void;
   onPrimary: () => void;
   onHome?: () => void;
+  sidebarCollapsed?: boolean;
+  onToggleSidebar?: () => void;
 }
 
 /**
@@ -58,6 +60,8 @@ export function PageHeader({
   onGmailFetch,
   onPrimary,
   onHome,
+  sidebarCollapsed,
+  onToggleSidebar,
 }: Props) {
   const navigate = useNavigate();
   const hero = heroFor(view, appCount, outreach);
@@ -65,24 +69,22 @@ export function PageHeader({
   const titleRef = useRef<HTMLHeadingElement>(null);
   const badgeRef = useRef<HTMLSpanElement>(null);
   const prevTitle = useRef(hero.title);
-  const [scrolled, setScrolled] = useState(false);
-
-  useEffect(() => {
-    const onScroll = () => {
-      setScrolled(window.scrollY > 30);
-    };
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
-  }, []);
 
   const handleHomeClick = (e?: React.MouseEvent) => {
     if (e) e.preventDefault();
-    if (onHome) {
-      onHome();
+    const go = () => {
+      if (onHome) {
+        onHome();
+      } else {
+        navigate('/');
+      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+    if (typeof document !== 'undefined' && 'startViewTransition' in document) {
+      (document as any).startViewTransition(go);
     } else {
-      navigate('/');
+      go();
     }
-    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   // Mount-only assembly of the three brand shapes, staggered — run once per
@@ -154,68 +156,57 @@ export function PageHeader({
 
   return (
     // Spans both columns so the title reads first on mobile.
-    // Floating glassmorphic header capsule with rounded edges and backdrop blur.
-    <header
-      className={`sticky top-3 z-40 md:col-span-2 w-full transition-all duration-300 ${
-        scrolled
-          ? 'glass-header rounded-full py-2 px-4 sm:px-6 shadow-xl mb-4'
-          : 'glass-header rounded-2xl md:rounded-3xl p-3.5 sm:px-6 sm:py-3.5 mb-6'
-      } flex items-center justify-between gap-3`}
-    >
-      <div className="min-w-0">
-        <Link
+    <header className="sticky top-3 z-40 md:col-span-2 w-full glass-header rounded-2xl md:rounded-3xl p-3 sm:px-6 sm:py-3.5 mb-6 flex items-center justify-between gap-2 sm:gap-3 shadow-xl min-w-0 max-w-full">
+      <div className="flex items-center gap-3 min-w-0">
+        {onToggleSidebar && (
+          <button
+            type="button"
+            onClick={onToggleSidebar}
+            title={sidebarCollapsed ? 'Expand sidebar (Ctrl+B)' : 'Minimize sidebar'}
+            aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Minimize sidebar'}
+            className="hidden md:inline-flex items-center justify-center h-9 w-9 rounded-xl border border-black/[0.08] dark:border-white/[0.1] bg-panel/80 hover:bg-panel-2 text-ink-soft hover:text-ink transition-colors shrink-0 shadow-sm"
+          >
+            <Icon.Menu className="h-4 w-4" />
+          </button>
+        )}
+        <div className="min-w-0">
+          <Link
           to="/"
           onClick={handleHomeClick}
-          className={`group/homelink flex ${
-            scrolled ? 'flex-row items-center gap-2.5' : 'flex-col items-start'
-          } focus:outline-none transition`}
+          className="group/homelink flex flex-col items-start focus:outline-none transition"
           title="Job Search HQ — Return to Pipeline Home"
           aria-label="Job Search HQ — Pipeline Home"
         >
           {/* Brand mark — circle/square/triangle */}
           <div
             ref={markRef}
-            className={`group/mark flex w-fit cursor-pointer items-center gap-1.5 ${
-              scrolled ? '' : 'mb-0.5'
-            }`}
+            className="group/mark flex w-fit cursor-pointer items-center gap-1.5 mb-0.5"
             aria-hidden="true"
             onMouseEnter={poke}
             onMouseLeave={unpoke}
           >
             <span
               data-mark-shape
-              className={`${
-                scrolled ? 'h-2 w-2' : 'h-2.5 w-2.5'
-              } rounded-full bg-accent transition-transform duration-200 group-hover/homelink:scale-110 shadow-sm`}
+              className="h-2.5 w-2.5 rounded-full bg-accent transition-transform duration-200 group-hover/homelink:scale-110 shadow-sm"
             />
             <span
               data-mark-shape
-              className={`${
-                scrolled ? 'h-2 w-2' : 'h-2.5 w-2.5'
-              } rounded-[3px] bg-applied transition-transform duration-200 group-hover/homelink:scale-110 shadow-sm`}
+              className="h-2.5 w-2.5 rounded-[3px] bg-applied transition-transform duration-200 group-hover/homelink:scale-110 shadow-sm"
             />
             <span
               data-mark-shape
-              className={`${
-                scrolled ? 'h-2 w-2' : 'h-2.5 w-2.5'
-              } bg-primary-yellow transition-transform duration-200 group-hover/homelink:scale-110 shadow-sm`}
+              className="h-2.5 w-2.5 bg-primary-yellow transition-transform duration-200 group-hover/homelink:scale-110 shadow-sm"
               style={{ clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)' }}
             />
             <span
-              className={`rounded-full border border-accent/25 bg-accent/10 px-1.5 py-0.2 text-[9px] font-bold uppercase tracking-wider text-accent font-mono transition-opacity ${
-                scrolled ? 'opacity-100' : 'opacity-0 group-hover/homelink:opacity-100'
-              }`}
+              className="rounded-full border border-accent/25 bg-accent/10 px-1.5 py-0.2 text-[9px] font-bold uppercase tracking-wider text-accent font-mono transition-opacity opacity-0 group-hover/homelink:opacity-100"
             >
               Home
             </span>
           </div>
           <h1
             ref={titleRef}
-            className={`flex items-center gap-2 font-black uppercase tracking-tight text-ink group-hover/homelink:text-accent transition-all ${
-              scrolled
-                ? 'text-sm sm:text-base'
-                : 'text-base sm:text-lg md:text-xl'
-            }`}
+            className="flex items-center gap-1.5 sm:gap-2 font-black uppercase tracking-tight text-ink group-hover/homelink:text-accent transition-all text-sm sm:text-lg md:text-xl whitespace-nowrap"
           >
             {hero.title}
             <span aria-hidden="true" className="emoji text-[0.8em] leading-none">
@@ -223,18 +214,17 @@ export function PageHeader({
             </span>
           </h1>
         </Link>
-        {!scrolled && (
-          <p className="mt-0.5 text-xs text-ink-soft font-medium truncate max-w-[260px] sm:max-w-none">
-            {hero.subtitle}
-          </p>
-        )}
+        <p className="mt-0.5 text-xs text-ink-soft font-medium truncate block max-w-[180px] xs:max-w-[240px] sm:max-w-none">
+          {hero.subtitle}
+        </p>
+        </div>
       </div>
 
       <div className="flex items-center gap-2 shrink-0">
         <button
           onClick={onGmailFetch}
           className="btn-quiet h-8.5 sm:h-9 rounded-full px-2.5 sm:px-3 text-xs font-semibold gap-1.5"
-          title="Check your last 10 emails for job-tracker updates"
+          title="Check your last 10 emails for job-tracker updates — runs in the background, no terminal"
           aria-label="Check Gmail"
         >
           <Icon.Gmail className="h-3.5 w-3.5" />

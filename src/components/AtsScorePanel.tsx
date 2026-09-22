@@ -88,7 +88,7 @@ export function AtsScorePanel({ score }: { score: AtsScore }) {
       </ul>
 
       {score.explanation && (
-        <p className="mt-4 border-t border-line-soft pt-3 text-meta leading-relaxed text-ink-soft">
+        <p className="mt-4 border-t border-line-soft pt-3 text-meta leading-relaxed text-ink-soft break-words">
           {score.explanation}
         </p>
       )}

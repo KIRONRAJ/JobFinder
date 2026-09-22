@@ -261,11 +261,19 @@ export function AssessmentPrep() {
 
               {open && (
                 <div className="mt-4 space-y-4 border-t border-line-soft pt-4">
-                  {item.sections.map((s, i) => (
-                    <div key={i} className="panel-inset px-4 py-3.5">
-                      <MarkdownLite markdown={`## ${s.heading}\n\n${s.markdown}`} />
-                    </div>
-                  ))}
+                  {item.sections.map((s, i) => {
+                    const heading = s.heading || (s as { title?: string }).title || `Section ${i + 1}`;
+                    const markdown =
+                      s.markdown ||
+                      (Array.isArray((s as { bullets?: string[] }).bullets)
+                        ? (s as { bullets?: string[] }).bullets!.map((b: string) => `- ${b}`).join('\n')
+                        : '');
+                    return (
+                      <div key={i} className="panel-inset px-4 py-3.5">
+                        <MarkdownLite markdown={`## ${heading}\n\n${markdown}`} />
+                      </div>
+                    );
+                  })}
 
                   {item.showSpokeDiagram && <SpokeSequence />}
 
@@ -525,6 +533,12 @@ function PrepChecklist({
   );
 }
 
+function formatDuration(s: number): string {
+  if (s >= 60 && s % 60 === 0) return `${s / 60}m`;
+  if (s >= 60) return `${Math.floor(s / 60)}m ${s % 60}s`;
+  return `${s}s`;
+}
+
 /** A proportional horizontal time-budget bar — makes a spoken time limit
  *  ("30s to read, 90s to answer") legible as a shape, not just a number. */
 function TimerBar({ title, segments }: { title?: string; segments: { label: string; seconds: number }[] }) {
@@ -539,7 +553,7 @@ function TimerBar({ title, segments }: { title?: string; segments: { label: stri
             key={i}
             className={`${palette[i % palette.length]} flex items-center justify-center`}
             style={{ width: `${(seg.seconds / total) * 100}%` }}
-            title={`${seg.label} — ${seg.seconds}s`}
+            title={`${seg.label} — ${formatDuration(seg.seconds)}`}
           />
         ))}
       </div>
@@ -547,7 +561,7 @@ function TimerBar({ title, segments }: { title?: string; segments: { label: stri
         {segments.map((seg, i) => (
           <span key={i} className="flex items-center gap-1.5 text-micro text-ink-soft">
             <span className={`h-2 w-2 rounded-full ${palette[i % palette.length]}`} />
-            {seg.label} <span className="tabular-nums text-ink-faint">({seg.seconds}s)</span>
+            {seg.label} <span className="tabular-nums text-ink-faint">({formatDuration(seg.seconds)})</span>
           </span>
         ))}
       </div>

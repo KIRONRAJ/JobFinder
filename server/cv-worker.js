@@ -9,6 +9,8 @@ import fsSync from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { syncPage } from './notion.js';
+import { generateContent } from './ai-models.js';
+import { isFetchableUrl } from './safe-url.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_DIR = path.resolve(__dirname, '..');
@@ -20,6 +22,22 @@ const SCRIPTS_DIR = path.join(APP_DIR, 'scripts');
 const DEFAULT_GENERATOR_SCRIPT = path.join(SCRIPTS_DIR, 'generate-tailored-docs.py');
 const KEY_FACTS_DIR = path.join(CAREER_DIR, 'Project Notes');
 const POLL_INTERVAL_MS = 10_000;
+
+/**
+ * Ceiling on the grounding facts pasted into the drafting prompt.
+ *
+ * This was 6,000, against a facts corpus of ~33,000 characters — so only ~18%
+ * reached the model, and the cut landed partway through the FIRST of the four
+ * files loadCandidateFacts() reads. research-project.md, skills-and-experience.md
+ * and certifications.md were being read off disk and then discarded whole,
+ * which is why the prompt still carries a hardcoded copy of the work history
+ * and certifications to compensate.
+ *
+ * 60,000 clears the current corpus with room to grow and is still a small
+ * fraction of the model's context window. Kept as a bound rather than removed
+ * so an accidentally huge facts file can't blow up every request.
+ */
+const MAX_FACTS_CHARS = 60_000;
 
 export function resolvePython() {
   const venvPython = path.join(APP_DIR, '.venv', 'bin', 'python');
@@ -50,6 +68,13 @@ export async function loadCandidateFacts() {
 
 export async function fetchJobText(url, execFileImpl = execFile) {
   if (!url) return '';
+  // A job ad lives on the public internet. Refusing private targets stops this
+  // scrape being usable as a proxy into loopback or the tailnet; an empty
+  // string is what a failed fetch already looks like to every caller.
+  if (!isFetchableUrl(url)) {
+    console.warn(`cv-worker: refusing to fetch non-public URL: ${url}`);
+    return '';
+  }
   return new Promise((resolve) => {
     execFileImpl(
       'curl',
@@ -84,16 +109,12 @@ export async function generateTailoredDocSpec({
   jobText = '',
   apiKey = process.env.GEMINI_API_KEY,
 }) {
-  if (!apiKey) {
-    throw new Error('GEMINI_API_KEY is not configured in environment or .env');
-  }
-
   const systemContext = [
-    'You are the expert career assistant and CV/cover letter drafter for Kironraj Odatt Peringode.',
+    'You are the expert career assistant and CV/cover letter drafter for the candidate described in candidateFacts.',
     'Generate a tailored CV and single-page Cover Letter for the following job opportunity.',
     '',
     'VOICE AND STYLE (MANDATORY — READ FIRST):',
-    'Write as Kironraj speaking in first person. Use natural, conversational English — the way a real person',
+    'Write in first person as the candidate. Use natural, conversational English — the way a real person',
     'would explain their work to a colleague over coffee. Every skills paragraph and experience section must',
     'tell a story grounded in a real situation: include the company name, what happened, and what was learned.',
     '',
@@ -107,96 +128,79 @@ export async function generateTailoredDocSpec({
     'Career Objective example: "I want to work in cyber security and IT operations, with a strong interest in',
     'security operations and network security. I like the moment when a system stops being a mystery: when a',
     'stack of logs or a strange ticket turns into a clear cause and a fix."',
-    'Skills Summary example: "At Keralavision Broadband I worked the L2 tier on a 24/7 rotating roster, sitting',
+    'Skills Summary example: "At a mid-size ISP I worked the L2 tier on a 24/7 rotating roster, sitting',
     'between L1 and L3 on live network faults. A typical case started as a vague customer complaint, and I had',
     'to work back through the ticket, the monitoring data and, when it came to it, a call with our upstream carrier..."',
     '',
-    'GROUNDING RULES (STRICT AND NON-NEGOTIABLE):',
+    'GROUNDING RULES (STRICT AND NON-NEGOTIABLE) — every fact below is illustrative placeholder data;',
+    'in production this whole block is populated from candidateFacts, never hardcoded like this demo:',
     '1. Candidate Identity & Contact:',
-    '   - Full Name: KIRONRAJ ODATT PERINGODE',
-    '   - Address: Trentham, Upper Hutt, Wellington',
-    '   - Phone: +64-22-131-9495',
-    '   - Email: kiron.raj.op@gmail.com',
-    '   - LinkedIn: linkedin.com/in/kironrajop',
-    '   - Web: www.kironraj.com',
-    '   - Work Eligibility: 3-year Post Study Work Visa (Open Work Visa) – full open work rights, no sponsorship required.',
-    "   - Driver Licence: Full, clean New Zealand driver's licence. Owns a car. Located in Trentham, Upper Hutt.",
-    '   - ZERO PII: Do not include street address, age, date of birth, nationality, marital status, gender, or bare "Referees" heading.',
+    '   - Full Name: from candidateFacts.name',
+    '   - Address, phone, email, LinkedIn, personal site: from candidateFacts.contact',
+    '   - Work Eligibility: from candidateFacts.workEligibility, stated exactly as provided — never paraphrased.',
+    '   - Driver Licence: dedicated line if candidateFacts includes one, on its own line below Work Eligibility with distinct vertical breathing space.',
+    '   - ZERO PII beyond the above: no street address, age, date of birth, nationality, marital status, gender, or bare "Referees" heading.',
     '',
     '2. Academic Qualifications:',
-    "   - Master's Degree: Master of Information Technology (Cyber Security specialisation), completed with Merit (July 2026), Whitecliffe College, Wellington.",
-    "   - Master's Research Project: MUST be included under Project Experience: \"Replay Attack Prevention in Smart Car IoT Systems. Evaluated hybrid nonce- and counter-based defense across latency and detection rate in a simulated smart-vehicle IoT environment.\"",
-    '   - Undergraduate Degree: Bachelor of Technology in Electronics and Communication Engineering, Jyothi Engineering College, University of Calicut (06/2013 – 07/2017), Thrissur, India. (NEVER cite any other affiliating university).',
+    '   - Pull every degree, research project, and institution verbatim from candidateFacts.education — never invent or substitute an affiliating university.',
     '',
-    '3. Authentic Work History (4 roles — describe what actually happened, not what sounds impressive):',
-    '   - Role 1: L2 NOC Engineer at Keralavision Broadband Pvt Limited (11/2017 – 06/2019 | Thrissur, Kerala)',
-    '     Keralavision is a well-known ISP across Kerala. Worked the L2 tier on a 24/7 rotating roster, providing',
-    '     back-end network configuration and troubleshooting, coordinating with technical support, service provisioning',
-    '     and sales teams to keep services at or above SLA. Raised and chased tickets with upstream carriers (Jio,',
-    '     Airtel, Vodafone, Powertel). Supported customers and operators via AnyDesk and TeamViewer. Helped with',
-    '     server installation on DNS and speed-test servers. Documented every ticket so lessons learned made it into',
-    '     the team knowledge base.',
-    '   - Role 2: Software Engineer at Poornam Infovision Pvt Ltd, trading internationally as Bobcares (04/2021 – 07/2021 | Kochi, Kerala)',
-    '     Poornam is a 24/7 outsourced technical support provider for hosting companies. Provided technical support for',
-    '     Linux and Windows servers and web hosting. Handled server security, hardening and performance tuning through',
-    '     control panel management. Set up and administered VPS and dedicated servers. Worked with the development and',
-    '     testing team to build solutions meeting client requirements. Communicated directly with clients over calls,',
-    '     email, live chat and helpdesk. Worked over VNC, diagnosing server problems from logs and behaviour.',
-    '   - Role 3: Production Labourer at Tuatara Brewery (02/2026 – 03/2026 | Brewtown, Upper Hutt, New Zealand)',
-    '     Packed and sealed beer bottles and cans. Checked batches for labeling accuracy and fill levels. Organized',
-    '     finished products in the storage area for shipping. Plain language only — do NOT inflate this role.',
-    '   - Role 4: Freelance Web Developer (07/2021 – 06/2025 | Thrissur, India)',
-    '     Built websites using HTML, CSS, JavaScript and jQuery. Discussed requirements with clients and produced',
-    '     development plans. Ran debugging tools before publishing. Implemented changes to streamline business operations.',
+    '3. Authentic Work History (describe what actually happened, not what sounds impressive):',
+    '   - Order roles by relevance to the target role, most relevant technical roles first.',
+    '   - Example shape only (replace with candidateFacts.workHistory in production):',
+    '   - Role: L2 NOC Engineer at a regional ISP (2 years, rotating 24/7 roster)',
+    '     Provided back-end network configuration and troubleshooting, coordinating with technical support, service',
+    '     provisioning and sales teams to keep services at or above SLA. Raised and chased tickets with upstream',
+    '     carriers. Documented every ticket so lessons learned made it into the team knowledge base.',
+    '   - Role: Software Support Engineer at a hosting/outsourcing provider',
+    '     Provided technical support for Linux and Windows servers and web hosting. Handled server security,',
+    '     hardening and performance tuning through control panel management. Communicated directly with clients',
+    '     over calls, email, live chat and helpdesk.',
+    '   - A short-tenure or manual-labour role should stay in plain, unembellished language — do NOT inflate it.',
     '',
     '4. Certifications & Upskilling (be precise about status — never round up):',
-    '   - Red Hat Certified System Administrator (RHCSA) — Verification ID: 240-025-115 (active, genuine held certification)',
-    '   - Google Cybersecurity Professional Certificate — Coursera (currently completing, 5 of 8 courses complete — say exactly this)',
-    '   - cPanel Professional Certification (CPP) & cPanel & WHM Administrator (CWA) — held 2021–2022 (lapsed — say "held", not "hold")',
-    '   - freeCodeCamp Responsive Web Design certification (around 300 hours of coursework)',
-    '   - CCNA training certificate (Vidya Academy — this is a TRAINING certificate, NOT a Cisco-issued certification)',
-    '   - STRICT PROHIBITION ON SERVICENOW: NEVER add ServiceNow (e.g. "ServiceNow Fundamentals", "ServiceNow training") anywhere on the CV or Cover Letter. Candidate is only beginning self-study and has explicitly forbidden adding it to applications.',
-    '   - Do NOT claim Google Cybersecurity cert as complete until all 8 courses are done.',
+    '   - State exactly what candidateFacts records: "held" vs "hold" for lapsed certifications, "completed" vs',
+    '     "completing X of Y courses" for in-progress ones, "training" vs "certification" where the two differ.',
+    '   - NEVER add a credential, tool, or platform the candidate has not confirmed — if candidateFacts explicitly',
+    '     forbids naming a specific tool/platform, honour that exclusion on every document.',
     '',
     '5. STRICT ANTI-HALLUCINATION & FACTUAL GROUNDING (ZERO TOLERANCE FOR FABRICATION):',
-    '   - You must NEVER claim experience with proprietary tools from the job ad (e.g. "Kraken", "Salesforce", etc.)',
-    '     unless they appear in Candidate Key Facts.',
+    '   - You must NEVER claim experience with a proprietary tool named in the job ad unless it appears in candidateFacts.',
     '   - Do NOT mirror the employer\'s proprietary tool names into Skills or Work History.',
     '   - Highlight authentic, transferable fundamentals instead.',
     '',
     '6. STRICT PROHIBITION ON PERSONAL INTERESTS / HOBBIES:',
-    '   NEVER include an "Interests & Activities" or hobbies section on the CV.',
-    '   Candidate explicitly considers personal hobbies unprofessional for technical and engineering roles.',
+    '   NEVER include an "Interests & Activities" or hobbies section on the CV, unless candidateFacts explicitly opts in.',
     '   Keep the CV strictly focused on technical competencies, professional experience, education, projects, and verifiable credentials.',
     '',
     '7. Tailoring to Job Ad:',
-    '   - Tailor the Career Objective to explain why this specific type of work appeals to Kironraj, connected to real experience.',
+    '   - Tailor the Career Objective to explain why this specific type of work appeals to the candidate, connected to real experience.',
     '   - Tailor the Skills Summary story-paragraphs to emphasize the genuine capabilities most relevant to the role.',
     '   - Tailor the Detailed Experience narratives to highlight genuine skills relevant to the role.',
     '   - Do NOT change facts, only emphasis and framing.',
     '',
     '8. Cover Letter Requirements:',
+    '   - Date: MUST use the current date in standard New Zealand format (e.g. "11 September 2026"). Never hardcode a stale date.',
     '   - Greeting: MUST be standard professional English: "Dear Hiring Team," (or "Dear [Hiring Manager Name]," if known).',
-    '     STRICTLY FORBIDDEN: Do NOT use Māori greetings such as "Tēnā koe" or "Kia ora".',
+    '     STRICTLY FORBIDDEN: Do NOT use Māori greetings such as "Tēnā koe" or "Kia ora" unless candidateFacts explicitly requests them.',
     '   - Structure:',
-    '     - Opening: State the role and company, noting living in Trentham, Upper Hutt, engineering degree + Master of IT with Merit.',
+    '     - Opening: State the role and company, noting location and headline qualification from candidateFacts.',
     '     - Body Para 1: Technical & analytical alignment with key job responsibilities.',
-    '     - Body Para 2: Proven operational discipline, ticketing, communication, and reliability from Keralavision & Poornam.',
-    '     - Body Para 3: Local Upper Hutt presence, full clean NZ driver licence, reliable commute, 3-year Post Study Work Visa (Open Work Visa), and eager commitment.',
+    '     - Body Para 2: Proven operational discipline, ticketing, communication, and reliability, grounded in candidateFacts.workHistory.',
+    '     - Body Para 3: Local presence/commute, work eligibility exactly as recorded in candidateFacts, and eager commitment.',
     '     - Closing: Professional, respectful appreciation and invitation to discuss further.',
-    '   - Signoff: MUST be standard professional English: "Sincerely,\\nKironraj Odatt Peringode" (or "Kind regards,\\nKironraj Odatt Peringode").',
-    '     STRICTLY FORBIDDEN: Do NOT use Māori signoffs such as "Ngā mihi nui" or "Ngā mihi".',
+    '   - Signoff: MUST be standard professional English: "Sincerely,\\n<candidate name>" (or "Kind regards,\\n<candidate name>").',
+    '     STRICTLY FORBIDDEN: Do NOT use Māori signoffs such as "Ngā mihi nui" or "Ngā mihi" unless candidateFacts explicitly requests them.',
     '   - WORD COUNT BUDGET: The cover letter body (starting from greeting to before signoff) MUST be strictly between 330 and 365 words.',
-    '   - Must use exact phrase "3-year Post Study Work Visa (Open Work Visa)" to match the CV.',
+    '   - Must state the work-eligibility phrase from candidateFacts exactly the same way in both the CV and cover letter.',
     '',
     'RETURN FORMAT:',
     'Return ONLY valid JSON with these keys:',
     '"company", "role", "profile", "skills", "workHistory", "education", "projects", "certifications", "coverLetter".',
     '',
     'Where:',
-    '- profile is a string: crisp 3-4 sentence professional summary (60-80 words) tailored to the role, grounded in actual engineering qualifications and support experience.',
+    '- profile is a string: crisp 3-4 sentence professional summary (60-80 words) tailored to the role, grounded in candidateFacts. MUST contain ONLY the paragraph text itself — NEVER include candidate name, address, contact details, visa info, or prefixes like "Professional Summary:".',
     '- skills is an array of {"category": string, "detail": string} — 5 core competencies tailored to the role, each with specific technical tools and responsibilities.',
-    '- workHistory is an array of {"role": string, "company": string, "period": string, "bullets": string[]} — 4 authentic roles (Tuatara, Freelance, Poornam, Keralavision), each with 3-4 active, grounded bullet points.',
+    '- workHistory is an array of {"role": string, "company": string, "period": string, "bullets": string[]} — every role from candidateFacts.workHistory, each with 3-4 active, grounded bullet points.',
     '- education is an array of {"title": string, "institution": string, "bullets": string[]}.',
     '- projects is an array of {"title": string, "subtitle": string, "bullets": string[]}.',
     '- certifications is an array of strings.',
@@ -214,81 +218,71 @@ export async function generateTailoredDocSpec({
     jobText || entry.notes || `${entry.company} — ${entry.role}`,
     '',
     '--- CANDIDATE SOURCE OF TRUTH ---',
-    candidateFacts.slice(0, 6000),
+    candidateFacts.slice(0, MAX_FACTS_CHARS),
   ].join('\n\n');
 
-  const candidateModels = [
-    'gemini-3.5-flash',
-    'gemini-3.7-flash',
-    'gemini-3.6-flash',
-    'gemini-3.5-flash-lite',
-  ];
-
-  const payload = {
-    contents: [
-      {
-        parts: [{ text: `${systemContext}\n\n${userPrompt}` }],
-      },
-    ],
-    generationConfig: {
-      responseMimeType: 'application/json',
-      temperature: 0.2,
-    },
-  };
-
-  let rawJson = null;
-  let lastErr = null;
-
-  for (const model of candidateModels) {
-    try {
-      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) {
-        lastErr = new Error(`Gemini API HTTP ${response.status}: ${await response.text()}`);
-        continue;
-      }
-
-      const resData = await response.json();
-      const text = resData?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (text) {
-        rawJson = text;
-        console.log(`cv-worker: successfully drafted CV spec with ${model}`);
-        break;
-      }
-    } catch (err) {
-      lastErr = err;
-    }
-  }
-
-  if (!rawJson) {
-    throw lastErr || new Error('All Gemini model candidates failed to produce CV spec');
-  }
+  const { text: rawJson, model } = await generateContent({
+    parts: [{ text: `${systemContext}\n\n${userPrompt}` }],
+    generationConfig: { responseMimeType: 'application/json', temperature: 0.2 },
+    apiKey,
+  });
+  console.log(`cv-worker: successfully drafted CV spec with ${model}`);
 
   const spec = JSON.parse(rawJson);
   spec.company = spec.company || entry.company;
   spec.role = spec.role || entry.role;
-  const cleanCompany = spec.company.replace(/\s*[/\\|]\s*/g, ' - ').replace(/[\?%*:"><]/g, '').replace(/\s+/g, ' ').trim();
-  spec.outputDir = path.join('Pending to Apply', cleanCompany);
+  const cleanCompany = spec.company
+    .replace(/\s*[/\\|]\s*/g, ' - ')
+    .replace(/[\?%*:"><]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Write into the entry's existing folder when it has one.
+  //
+  // This used to hardcode 'Pending to Apply/<company>' and then overwrite
+  // entry.folderPath with it further down, so regenerating a CV for a role
+  // already at Applied/ or Interview/ silently dragged its folderPath back to
+  // Pending to Apply/ — while the documents for that role stayed where they
+  // were. That is the most likely source of the tracker/disk mismatches found
+  // in the 15 Sep 2026 cleanup audit, where five entries pointed at folders
+  // that no longer existed.
+  //
+  // Guarded rather than trusted: folderPath is user-editable, so anything
+  // absolute, empty, or escaping the repo falls back to the old default.
+  const existing = typeof entry.folderPath === 'string' ? entry.folderPath.trim() : '';
+  const insideRepo =
+    existing &&
+    !path.isAbsolute(existing) &&
+    !path.normalize(existing).split(/[\\/]/).includes('..');
+  spec.outputDir = insideRepo ? existing : path.join('Pending to Apply', cleanCompany);
+
+  const todayFormatted = new Date().toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'Pacific/Auckland',
+  });
 
   if (typeof spec.coverLetter === 'string') {
     spec.coverLetter = {
-      date: '5 September 2026',
-      addressee: `Hiring Team\n${spec.company}\nWellington, New Zealand`,
+      date: todayFormatted,
+      addressee: `Hiring Team\n${spec.company}\n${entry.location || 'Wellington, New Zealand'}`,
       greeting: 'Dear Hiring Team,',
       paragraphs: spec.coverLetter.split('\n\n').filter((p) => p.trim()),
-      signoff: 'Sincerely,\nKironraj Odatt Peringode',
+      signoff: 'Sincerely,\nJordan Smith',
     };
   } else if (spec.coverLetter && typeof spec.coverLetter === 'object') {
+    if (!spec.coverLetter.date || spec.coverLetter.date.trim() === '5 September 2026' || /october\s+2026/i.test(spec.coverLetter.date)) {
+      spec.coverLetter.date = todayFormatted;
+    }
     if (!spec.coverLetter.greeting || /t[eē]n[aā]|kia\s*ora/i.test(spec.coverLetter.greeting)) {
       spec.coverLetter.greeting = 'Dear Hiring Team,';
     }
     if (!spec.coverLetter.signoff || /ng[aā]\s*mihi/i.test(spec.coverLetter.signoff)) {
-      spec.coverLetter.signoff = 'Sincerely,\nKironraj Odatt Peringode';
+      spec.coverLetter.signoff = 'Sincerely,\nJordan Smith';
+    }
+    if (!spec.coverLetter.addressee) {
+      spec.coverLetter.addressee = `Hiring Team\n${spec.company}\n${entry.location || 'Wellington, New Zealand'}`;
     }
   }
 
@@ -315,6 +309,11 @@ export async function processSingleCvRequest(
     generatorScript = DEFAULT_GENERATOR_SCRIPT,
     apiKey = process.env.GEMINI_API_KEY,
     execFileImpl = execFile,
+    // Injected by index.js as withDataLock('applications', fn) so the worker
+    // shares the one lock guarding this file. Defaults to a pass-through: the
+    // tests drive this function directly against a temp file with no server
+    // running, where there is nothing to serialise against.
+    lock = (fn) => fn(),
   } = {}
 ) {
   const reqContent = await fsPromises.readFile(requestFilePath, 'utf8');
@@ -372,11 +371,18 @@ export async function processSingleCvRequest(
   // Clean up spec file
   await fsPromises.unlink(specFile).catch(() => {});
 
-  // 6. Update applications.json
-  const updatedAppsRaw = await fsPromises.readFile(dataFile, 'utf8');
-  const updatedApps = JSON.parse(updatedAppsRaw);
-  const idx = updatedApps.findIndex((a) => a.id === entry.id || a.matchKey === entry.matchKey);
-  if (idx !== -1) {
+  // 6. Update applications.json.
+  //
+  // The whole read-modify-write runs inside the caller-supplied lock, not just
+  // the write: this worker fires off an fs.watch plus a 10s poll, so without it
+  // it can read the same snapshot as an in-flight API request and clobber
+  // whatever that request wrote. The generator call above deliberately stays
+  // OUTSIDE the lock — it can take 90s, and holding the applications lock that
+  // long would stall every API write behind it.
+  const updatedEntry = await lock(async () => {
+    const updatedApps = JSON.parse(await fsPromises.readFile(dataFile, 'utf8'));
+    const idx = updatedApps.findIndex((a) => a.id === entry.id || a.matchKey === entry.matchKey);
+    if (idx === -1) return null;
     updatedApps[idx] = {
       ...updatedApps[idx],
       cvStatus: 'drafted',
@@ -392,11 +398,18 @@ export async function processSingleCvRequest(
         },
       ],
     };
-    await fsPromises.writeFile(dataFile, JSON.stringify(updatedApps, null, 2), 'utf8');
+    // Temp-then-rename, matching writeData() in server/index.js — rename is
+    // atomic, so an interrupted write can never truncate the real file.
+    const tmp = `${dataFile}.tmp`;
+    await fsPromises.writeFile(tmp, JSON.stringify(updatedApps, null, 2), 'utf8');
+    await fsPromises.rename(tmp, dataFile);
+    return updatedApps[idx];
+  });
 
+  if (updatedEntry) {
     // 7. Sync to Notion
     try {
-      await syncPage(updatedApps[idx]);
+      await syncPage(updatedEntry);
     } catch (nErr) {
       console.error('cv-worker: Notion sync error (non-blocking):', nErr.message);
     }

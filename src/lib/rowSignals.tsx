@@ -1,4 +1,4 @@
-import { AppliedTag, CvTag, DeadlineTag, EvidenceTag, FollowUpTag, NextActionTag, PriorityTag } from '../components/Badges';
+import { AppliedTag, CorrespondenceTag, CvTag, DeadlineTag, EvidenceTag, FollowUpTag, NextActionTag, PriorityTag } from '../components/Badges';
 import { resolveEvidenceMap, countByState } from './evidenceState';
 import { isCvActuallyQueued } from './readiness';
 import { DEADLINE_SOON_DAYS, STALE_APPLIED_DAYS, daysSince, daysUntil } from '../types';
@@ -131,6 +131,16 @@ export function rowSignals(app: Application, folder?: FolderStatus): RowSignal[]
         render: () => <AppliedTag app={app} />,
       });
     }
+  }
+
+  // Correspondence: employer communication logged
+  if (app.trackingNotes && app.trackingNotes.trim()) {
+    signals.push({
+      key: 'correspondence',
+      weight: 65,
+      tone: 'inflight',
+      render: () => <CorrespondenceTag app={app} />,
+    });
   }
 
   return signals.filter((s) => s.weight >= 60).sort((a, b) => b.weight - a.weight);

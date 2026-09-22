@@ -16,7 +16,7 @@ import type { DiagramKey } from '../components/ConceptDiagram';
  *  - `sayThis`  a sentence that is actually speakable out loud in an interview.
  *
  * `sayThis` is deliberately framed as honest-if-thin: several of these are
- * concepts Kironraj knows academically rather than from a production role, and
+ * concepts Jordan knows academically rather than from a production role, and
  * a line that oversells is worse than no line. Where that applies the wording
  * says "conceptually" or "from study" rather than implying work history —
  * same honesty standard the CV and evidence-map already hold to.
@@ -139,14 +139,14 @@ export const REFRESHERS: Record<string, Refresher> = {
     what: 'The operating system running most servers — administered from the command line rather than a GUI.',
     why: 'Infrastructure roles assume you can navigate, read logs and diagnose a service without a desktop.',
     sayThis:
-      'I administered Linux servers at Poornam Infovision — services, logs, permissions, control panels on VPS and dedicated hosts — and hold RHCSA.',
+      'I administered Linux servers at Cascade Infovision — services, logs, permissions, control panels on VPS and dedicated hosts — with strong Red Hat and Debian/Ubuntu Linux administration experience.',
     aliases: ['linux', 'rhel', 'red hat', 'ubuntu', 'unix/linux', 'linux administration'],
   },
   'Windows Server': {
     what: "Microsoft's server operating system, and the roles it hosts — file, print, directory, and application services.",
     why: 'Most NZ organisations run a mixed estate, so both sides of the fence get asked about.',
     sayThis:
-      'Comfortable across both — at Poornam my work was on remote Windows and Linux VPS estates plus shared WordPress hosting, reached over VNC, so the mixed estate was the normal day rather than the exception.',
+      'Comfortable across both — at Cascade my work was on remote Windows and Linux VPS estates plus shared WordPress hosting, reached over VNC, so the mixed estate was the normal day rather than the exception.',
     aliases: ['windows server', 'windows administration', 'windows'],
   },
   'L1 / L2 / L3 support tiers': {
@@ -190,7 +190,7 @@ export const REFRESHERS: Record<string, Refresher> = {
     what: 'The queue where work arrives, gets prioritised, worked and documented.',
     why: 'It is the visible record of whether you communicate and close things out — employers check for it explicitly, and it is the most-requested keyword across your live applications.',
     sayThis:
-      'Both my operational roles ran entirely through ticket queues. At Keralavision I worked an ISP ticketing platform as the L2 tier — taking escalations from L1, doing in-call troubleshooting with L1 and L3, and raising and chasing tickets with the major leased-line carriers, Jio, Airtel, Vodafone and Powertel, until they closed.',
+      'Both my operational roles ran entirely through ticket queues. At Northline I worked an ISP ticketing platform as the L2 tier — taking escalations from L1, doing in-call troubleshooting with L1 and L3, and raising and chasing tickets with the major leased-line carriers, Jio, Airtel, Vodafone and Powertel, until they closed.',
     aliases: [
       'service desk',
       'help desk',
@@ -204,7 +204,7 @@ export const REFRESHERS: Record<string, Refresher> = {
   },
   // Deliberately NOT an alias of "Ticketing / service desk". Folding them
   // together made a named-platform gap ("ServiceNow, certified/production
-  // experience") paint the general ticketing term as a gap — telling Kironraj
+  // experience") paint the general ticketing term as a gap — telling Jordan
   // to revise the one part of this area he is genuinely strong in. The queue
   // discipline and the specific product are different claims.
   'ITSM platforms (ServiceNow / Jira)': {
@@ -218,14 +218,14 @@ export const REFRESHERS: Record<string, Refresher> = {
     what: 'Driving a fault that sits inside someone else\'s network or product — raising it with the supplier, chasing it against their SLA, and keeping your own customer informed while you wait.',
     why: 'It is the part of support you cannot fix yourself, so it tests persistence and communication rather than technical depth. Few service-desk candidates have done it with named carriers.',
     sayThis:
-      'At Keralavision I raised and followed up leased-line faults directly with Jio, Airtel, Vodafone and Powertel. The lesson was that the ticket does not close itself — you chase it on their SLA and keep your own customer updated while it sits with the vendor.',
+      'At Northline I raised and followed up leased-line faults directly with Jio, Airtel, Vodafone and Powertel. The lesson was that the ticket does not close itself — you chase it on their SLA and keep your own customer updated while it sits with the vendor.',
     aliases: ['vendor escalation', 'carrier', 'leased line', 'third-party escalation', 'supplier management'],
   },
   'Remote support tooling': {
     what: 'Taking control of, or shelling into, a machine you are not sitting at — remote-desktop tools for end users, VNC/SSH and consoles for servers.',
     why: 'Remote-first support is now the default, and employers want to know you can diagnose without being able to look over someone\'s shoulder.',
     sayThis:
-      'I supported customers and operators over AnyDesk and TeamViewer at Keralavision, and at Poornam the whole role was remote — VNC into Windows and Linux VPS estates and shared WordPress hosting, with client contact over Teams and Slack.',
+      'I supported customers and operators over AnyDesk and TeamViewer at Northline, and at Cascade the whole role was remote — VNC into Windows and Linux VPS estates and shared WordPress hosting, with client contact over Teams and Slack.',
     aliases: [
       'remote support',
       'anydesk',
@@ -333,6 +333,121 @@ export const REFRESHERS: Record<string, Refresher> = {
       'customer service',
       'stakeholder engagement',
       'customer-facing technical support',
+    ],
+  },
+  'Google Workspace for Education / Google Admin': {
+    what: "Google's cloud ecosystem for schools — user directory, Organisational Unit (OU) policy trees, force-installed extensions, and Chromebook device fleet settings.",
+    why: 'Secondary schools in NZ run predominantly on Google Workspace; interviewers check if you know where to look in admin.google.com and how policy inheritance works.',
+    sayThis:
+      'I understand OU policy inheritance, restriction policies like blocking incognito and personal Gmail sign-in, zero-touch and manual enterprise enrollment, and using Alt+V for instant lock-screen hardware diagnostics.',
+    aliases: [
+      'google workspace',
+      'google admin',
+      'google admin console',
+      'google workspace for education',
+      'g suite',
+      'chromebook ou',
+      'google ou',
+      'google policy management',
+      'chromebook provisioning',
+      'enterprise enrollment',
+    ],
+  },
+  'Chromebook Fleet Triage': {
+    what: 'The rapid diagnostic sequence for ChromeOS devices — lock screen shortcuts, hardware embedded controller resets, powerwashing, and OS recovery USBs.',
+    why: 'With hundreds of students carrying devices, technicians must isolate whether a fault is user profile corruption, battery cutoff, or physical hardware in under 60 seconds.',
+    sayThis:
+      'My first step is Alt+V at the sign-in screen to check OS version, serial number and Wi-Fi IP. For unresponsive hardware I do a Refresh+Power embedded controller reset, for profile bugs a Ctrl+Alt+Shift+R powerwash, and I keep a pre-imaged ChromeOS recovery USB in my toolkit.',
+    aliases: [
+      'chromebook',
+      'chromebooks',
+      'chromebook fleet',
+      'chromeos',
+      'powerwash',
+      'chromebook triage',
+      'chromebook repair',
+      'chromebook troubleshooting',
+    ],
+  },
+  'Enterprise Wi-Fi (802.1X)': {
+    what: 'Enterprise wireless security where each user or device authenticates individually via PEAP or EAP-TLS against a RADIUS server, rather than sharing a single password.',
+    why: 'Pre-shared keys leak across schools immediately; 802.1X is how student and staff traffic is isolated and authenticated, and certificate expiry is a common campus-wide failure mode.',
+    sayThis:
+      'I understand how Google Admin pushes Wi-Fi network profiles and trusted internal Root CA certificates to enrolled Chromebooks, and that a sudden campus-wide connection failure is usually an expired internal CA certificate or a RADIUS service timeout.',
+    aliases: [
+      '802.1x',
+      'enterprise wi-fi',
+      'enterprise wifi',
+      'radius',
+      'wpa2 enterprise',
+      'eap-tls',
+      'peap',
+      'wi-fi certificate',
+      'certificate distribution',
+    ],
+  },
+  'PaperCut MF': {
+    what: 'The print, copy, and scan management platform for education — virtual Find-Me queues, RFID ID card swipe release, and student quota tracking.',
+    why: 'It is the universal print accounting standard in NZ schools; technicians triage print spooler stalls, card association errors, and MFD embedded app faults.',
+    sayThis:
+      'I understand the Find-Me virtual queue model where jobs pause encrypted on the server until released via student ID badge swipe at an MFD. If printing halts campus-wide, my first check is clearing corrupt spooler jobs and restarting the PaperCut Print Provider service.',
+    aliases: [
+      'papercut',
+      'papercut mf',
+      'find-me printing',
+      'follow-me printing',
+      'print spooler',
+      'mfd',
+      'print management',
+      'print quotas',
+    ],
+  },
+  'N4L (Network for Learning)': {
+    what: 'Crown-funded managed network and cyber security infrastructure connecting over 2,500 NZ schools with Fortinet firewalls, safe search, and web filtering.',
+    why: 'All government school internet passes through N4L; engineers must know where school LAN responsibility ends and N4L boundary filtering begins.',
+    sayThis:
+      'I understand the N4L managed edge architecture — FortiGate firewalls, content filtering, and VLAN segmentation (Staff, Student, Admin, Guest) — and how to escalate legitimate website blocks or routing changes through 0800 LEARNING quoting the school ID.',
+    aliases: [
+      'n4l',
+      'network for learning',
+      'n4l managed network',
+      'fortinet school',
+      'school internet',
+      'school filtering',
+      'fortigate filtering',
+    ],
+  },
+  'Classroom AV & Interactive Displays': {
+    what: 'Classroom display systems — interactive panels (Newline, CommBox, Promethean) and projectors requiring separate video (HDMI) and touch digitizer (USB-Touch) feeds.',
+    why: "A broken classroom display stops a live lesson; technicians must know the 'two-cable rule' and diagnose touch versus video faults instantly.",
+    sayThis:
+      'Interactive panels require two independent connections: HDMI for display and USB for touch data. When touch is unresponsive, it is almost always a disconnected, unseated or mismatched USB-Touch lead, which I isolate by checking Device Manager HID drivers and testing with a known good flylead.',
+    aliases: [
+      'classroom av',
+      'interactive display',
+      'interactive panel',
+      'promethean',
+      'commbox',
+      'newline',
+      'touch screen tv',
+      'projector',
+      'usb touch',
+      'smart board',
+    ],
+  },
+  'Customer Empathy & Teacher De-escalation': {
+    what: 'The de-escalation framework for school IT — active listening, validating lost teaching time, deploying immediate classroom workarounds, and setting firm callback times.',
+    why: 'Teachers face 30 students and tight 50-minute periods; technical competence is useless without calm empathy and clear non-condescending communication.',
+    sayThis:
+      "In a school, every fault threatens a teacher's lesson. I listen without interrupting, validate their stress, deploy an immediate workaround so teaching continues, and commit to a specific time during their free period to complete and test the permanent fix.",
+    aliases: [
+      'customer empathy',
+      'teacher de-escalation',
+      'de-escalation',
+      'school culture',
+      'hallway requests',
+      'customer care',
+      'teacher support',
     ],
   },
 };

@@ -43,7 +43,7 @@ export function formatBriefing(apps, now = new Date()) {
   const weekday = now.toLocaleDateString('en-NZ', { weekday: 'long', timeZone: 'Pacific/Auckland' });
   const dayMonth = now.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', timeZone: 'Pacific/Auckland' });
 
-  const lines = [`☀️ Good morning Kironraj! — ${weekday}, ${dayMonth}`, ''];
+  const lines = [`☀️ Good morning Jordan! — ${weekday}, ${dayMonth}`, ''];
 
   if (urgentDeadlines.length > 0) {
     lines.push('⏰ Deadlines Closing Soon:');

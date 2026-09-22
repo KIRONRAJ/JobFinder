@@ -226,7 +226,7 @@ export const StatusIcon = ({ status }: { status: Status }) => {
 const STATUS_BADGE: Record<Status, string> = {
   researching: 'bg-neutral/10 border-neutral/30 text-neutral',
   // Deeper fill than the others (20/50 vs 10/30) — same reasoning as
-  // STATUS_WASH above, applied is the one status Kironraj scans for most.
+  // STATUS_WASH above, applied is the one status Jordan scans for most.
   applied: 'bg-applied/20 border-applied/50 text-applied',
   interview: 'bg-amber/10 border-amber/30 text-amber',
   offer: 'bg-grass/10 border-grass/30 text-grass',
@@ -250,7 +250,7 @@ export const StatusPill = ({ status }: { status: Status }) => {
       </span>
       {STATUS_TEXT[status]}
       {live && (
-        // Sized up from h-1.5 (Kironraj couldn't spot the ring at the old
+        // Sized up from h-1.5 (Jordan couldn't spot the ring at the old
         // size, especially on the applied pill where it now competes with
         // the blink animation on the pill itself).
         <span
@@ -304,12 +304,20 @@ export const DeadlineTag = ({ app }: { app: Application }) => {
   if (left === null) return null;
   const urgent = left <= DEADLINE_SOON_DAYS;
   const closed = left < 0;
+  const imminent = !closed && left <= 2;
   return (
     <span
-      className={`chip ${
+      className={`chip relative ${
         closed ? 'border-rose/40 text-rose' : urgent ? 'border-amber/40 text-amber' : ''
       }`}
     >
+      {imminent && (
+        <span
+          className="radar-ping-ring"
+          style={{ '--pulse-color': 'rgb(var(--rose))' } as React.CSSProperties}
+          aria-hidden="true"
+        />
+      )}
       <Icon.Clock className="h-3 w-3" />
       {deadlineLabel(left)}
     </span>
@@ -345,7 +353,7 @@ export const FollowUpTag = ({ app }: { app: Application }) => {
 };
 
 export const SalaryTag = ({ app }: { app: Application }) =>
-  app.salary ? <span className="chip">{app.salary}</span> : null;
+  app.salary ? <span className="chip max-w-full text-left whitespace-normal break-words leading-tight">{app.salary}</span> : null;
 
 export const ArrangementTag = ({ app }: { app: Application }) => {
   if (!app.workArrangement) return null;
@@ -362,6 +370,16 @@ export const ContactTag = ({ app }: { app: Application }) => {
     <span className="chip">
       <Icon.Mail className="h-3 w-3" />
       {app.contactName || app.contactEmail}
+    </span>
+  );
+};
+
+export const CorrespondenceTag = ({ app }: { app: Application }) => {
+  if (!app.trackingNotes || !app.trackingNotes.trim()) return null;
+  return (
+    <span className="chip border-line-soft text-ink-soft" title="Employer communication history logged">
+      <Icon.Mail className="h-3 w-3 text-red-500" />
+      <span>Correspondence</span>
     </span>
   );
 };

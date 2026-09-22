@@ -16,7 +16,7 @@ const STRENGTH_META = {
   gap: { label: 'Gap', tone: 'text-rose', icon: Icon.Octagon },
 } as const;
 
-/** Static career-route strip from Kironraj's AI Job Search Profile. */
+/** Static career-route strip from Jordan's AI Job Search Profile. */
 const CAREER_ROUTES = [
   { stage: 'Service Desk / NOC', now: true },
   { stage: 'Systems / Cloud Support', now: false },
@@ -90,7 +90,7 @@ export function MarketView({ apps, onOpenTerminal }: Props) {
           ))}
         </div>
         <p className="mt-3 text-micro text-ink-faint">
-          From `kironraj_ai_job_search_profile.md`. Progression, not a hard sequence.
+          From `career_route_profile.md`. Progression, not a hard sequence.
         </p>
       </section>
     </div>

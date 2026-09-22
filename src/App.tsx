@@ -26,12 +26,6 @@ import { Icon } from './components/Icons';
 import { Pipeline } from './components/Pipeline';
 import { AppCard } from './components/AppCard';
 import { TagBadge } from './components/Badges';
-import { EditModal } from './components/EditModal';
-import { AppliedModal } from './components/AppliedModal';
-import { ConfirmDelete } from './components/ConfirmDelete';
-import { AlertModal } from './components/AlertModal';
-import { CommandPalette } from './components/CommandPalette';
-import { TerminalPanel } from './components/TerminalPanel';
 import { Toaster, type ToastMsg } from './components/Toast';
 import { Sidebar, VIEW_META } from './components/Sidebar';
 import { MobileNav } from './components/MobileNav';
@@ -41,17 +35,18 @@ import { EventsBanner } from './components/EventsBanner';
 import { LoginGate } from './components/LoginGate';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { PageHeader } from './components/PageHeader';
-import { OutreachView } from './components/OutreachView';
-import { Celebration } from './components/Celebration';
 import { Wallpaper } from './components/Wallpaper';
-import { AgendaView } from './components/AgendaView';
 import { DeadlineCountdown } from './components/DeadlineCountdown';
 import { SkeletonRows, SkeletonPanels } from './components/SkeletonRows';
+import { DashboardSkeleton } from './components/DashboardSkeleton';
+import { HomeDashboard } from './components/dashboard/HomeDashboard';
+import { KineticLoader } from './components/dashboard/KineticLoader';
 import { AppDataProvider, useAppData } from './state/AppDataProvider';
 import { LegacyViewRedirect } from './routes/LegacyViewRedirect';
 import { pathToView, viewToPath } from './routes/viewRoutes';
+import type { VisualTheme } from './components/ThemeSelector';
 
-// Lazy-loaded routes with auto-retry on stale chunk deployment (v5.1.5)
+// Lazy-loaded routes and heavy modals with auto-retry on stale chunk deployment (v5.1.5 / v5.2.0)
 function lazyWithRetry<T extends React.ComponentType<any>>(
   factory: () => Promise<{ default: T }>
 ) {
@@ -79,10 +74,22 @@ function lazyWithRetry<T extends React.ComponentType<any>>(
 const RoleDetail = lazyWithRetry(() => import('./routes/RoleDetail').then((m) => ({ default: m.RoleDetail })));
 const Insights = lazyWithRetry(() => import('./routes/Insights').then((m) => ({ default: m.Insights })));
 const Study = lazyWithRetry(() => import('./routes/Study').then((m) => ({ default: m.Study })));
+const Settings = lazyWithRetry(() => import('./routes/Settings').then((m) => ({ default: m.Settings })));
 const BoardView = lazyWithRetry(() => import('./components/BoardView').then((m) => ({ default: m.BoardView })));
 const DenseTableView = lazyWithRetry(() => import('./components/DenseTableView').then((m) => ({ default: m.DenseTableView })));
 const DocumentPreviewModal = lazyWithRetry(() => import('./components/DocumentPreviewModal').then((m) => ({ default: m.DocumentPreviewModal })));
 const InterviewTransitionModal = lazyWithRetry(() => import('./components/InterviewTransitionModal').then((m) => ({ default: m.InterviewTransitionModal })));
+
+// On-demand modal & view code-splitting (v5.2.0)
+const TerminalPanel = lazyWithRetry(() => import('./components/TerminalPanel').then((m) => ({ default: m.TerminalPanel })));
+const EditModal = lazyWithRetry(() => import('./components/EditModal').then((m) => ({ default: m.EditModal })));
+const AppliedModal = lazyWithRetry(() => import('./components/AppliedModal').then((m) => ({ default: m.AppliedModal })));
+const ConfirmDelete = lazyWithRetry(() => import('./components/ConfirmDelete').then((m) => ({ default: m.ConfirmDelete })));
+const AlertModal = lazyWithRetry(() => import('./components/AlertModal').then((m) => ({ default: m.AlertModal })));
+const CommandPalette = lazyWithRetry(() => import('./components/CommandPalette').then((m) => ({ default: m.CommandPalette })));
+const Celebration = lazyWithRetry(() => import('./components/Celebration').then((m) => ({ default: m.Celebration })));
+const OutreachView = lazyWithRetry(() => import('./components/OutreachView').then((m) => ({ default: m.OutreachView })));
+const AgendaView = lazyWithRetry(() => import('./components/AgendaView').then((m) => ({ default: m.AgendaView })));
 
 function Dashboard() {
   const {
@@ -116,12 +123,13 @@ function Dashboard() {
     return window.matchMedia('(prefers-color-scheme: dark)').matches;
   });
   // Visual theme (genjutsu:paint, 30 Aug 2026) — separate from light/dark:
-  // Bauhaus stays the default, Pulse is opt-in, chosen from Sidebar's
-  // Appearance section. 'bauhaus' stores as no attribute at all so an old
+  // Bauhaus stays the default, Pulse is opt-in, chosen from Settings →
+  // Appearance. 'bauhaus' stores as no attribute at all so an old
   // localStorage value (or none) still resolves to the current default.
-  const [theme, setTheme] = useState<'bauhaus' | 'pulse'>(
-    () => (localStorage.getItem('visual_theme') === 'pulse' ? 'pulse' : 'bauhaus')
-  );
+  const [theme, setTheme] = useState<VisualTheme>(() => {
+    const v = localStorage.getItem('visual_theme');
+    return v === 'pulse' ? 'pulse' : v === 'cyber' ? 'cyber' : 'bauhaus';
+  });
   // Daily wallpaper (30 Aug 2026) — a Pexels photo behind the app, swapped
   // once a day server-side. Independent of `theme`: works under either.
   const [wallpaper, setWallpaper] = useState<boolean>(
@@ -181,6 +189,47 @@ function Dashboard() {
   const setEmploymentF = (v: string) => setParam('employment', v);
   const setTagF = (v: string) => setParam('tag', v);
 
+  // Home mode (v6.2.0 Overview): 'dashboard' (interactive Bento grid) or 'pipeline' (tactical role list)
+  const [homeMode, setHomeModeState] = useState<'dashboard' | 'pipeline'>(() => {
+    const param = searchParams.get('mode');
+    if (param === 'pipeline' || param === 'dashboard') return param;
+    const saved = localStorage.getItem('home_mode_pref');
+    if (saved === 'pipeline' || saved === 'dashboard') return saved;
+    return 'dashboard';
+  });
+  const setHomeMode = useCallback(
+    (mode: 'dashboard' | 'pipeline') => {
+      setHomeModeState(mode);
+      localStorage.setItem('home_mode_pref', mode);
+      setParam('mode', mode === 'dashboard' ? '' : mode);
+    },
+    [setParam]
+  );
+
+  // Sidebar collapsed rail mode (desktop)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => typeof window !== 'undefined' && localStorage.getItem('sidebar_collapsed') === 'true'
+  );
+
+  const handleToggleSidebar = useCallback(() => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      localStorage.setItem('sidebar_collapsed', String(next));
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        handleToggleSidebar();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [handleToggleSidebar]);
+
   const sotCount = useMemo(
     () =>
       apps.filter(
@@ -217,12 +266,81 @@ function Dashboard() {
   const [previewingApp, setPreviewingApp] = useState<Application | null>(null);
   const [interviewingApp, setInterviewingApp] = useState<Application | null>(null);
   const [terminalOpen, setTerminalOpen] = useState(false);
-  // Bumped by the homescreen Gmail button; TerminalPanel watches this to
-  // auto-start a gmailfetch run the moment it opens — see its own comment.
-  const [gmailFetchSignal, setGmailFetchSignal] = useState(0);
-  const handleGmailFetch = () => {
-    setTerminalOpen(true);
-    setGmailFetchSignal((n) => n + 1);
+  const [replayLoader, setReplayLoader] = useState(false);
+  /**
+   * The Gmail button runs the check itself — it does not open the terminal.
+   *
+   * It used to set `terminalOpen` and bump a counter that TerminalPanel watched
+   * to auto-start the run. That never fired: React 18 batches both setState
+   * calls into one render, so the panel mounted with the counter *already*
+   * incremented and its `useRef(gmailFetchSignal)` initialised to that same
+   * value — the effect's "has it changed?" guard was true on mount every time.
+   * Since the panel is conditionally mounted, it re-initialised on every open,
+   * so the button only ever opened an empty terminal and waited.
+   *
+   * Opening a terminal was never the point anyway: this is one fixed action
+   * with no prompt to write. So it POSTs directly and streams only to know when
+   * it's finished. The run's own narration belongs in the audit log and
+   * Telegram, which already receive it; here we just need the verdict.
+   */
+  const gmailRunning = useRef(false);
+  const handleGmailFetch = async () => {
+    if (gmailRunning.current) {
+      toast('Already checking your email — give it a moment.');
+      return;
+    }
+    gmailRunning.current = true;
+    // Deliberately NOT setClaudeRunning: that flag only changes cards that
+    // already have a CV queued, relabelling them "Processing…" and disabling
+    // their cancel button. The cv-worker runs on its own path and is unaffected
+    // by a Gmail check, so setting it here would mislabel those cards and block
+    // an unrelated control for the duration. The toasts are the feedback.
+    toast('Checking your last 10 emails…');
+
+    const finish = (message: string, tone: 'info' | 'error' = 'info') => {
+      if (!gmailRunning.current) return;
+      gmailRunning.current = false;
+      toast(message, tone);
+      refresh();
+    };
+
+    try {
+      const res = await fetch('/api/claude/gmailfetch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ count: 10 }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'Could not start the email check.');
+
+      const source = new EventSource(`/api/claude/stream/${body.runId}`);
+      // The prompt asks for "a short, direct summary of what you did", so the
+      // last assistant line is the result worth surfacing.
+      let lastOut = '';
+      source.onmessage = (e) => {
+        const event = JSON.parse(e.data) as { stream: string; line: string };
+        if (event.stream === 'out' && event.line.trim()) lastOut = event.line.trim();
+        if (event.stream !== 'done') return;
+        source.close();
+        const ok = event.line === '0';
+        finish(
+          ok
+            ? lastOut.slice(0, 300) || 'Email check finished — nothing new to log.'
+            : 'The email check failed. Open the terminal (Ctrl+J) to see why.',
+          ok ? 'info' : 'error'
+        );
+      };
+      source.onerror = () => {
+        // EventSource fires this on transient blips too, and reconnects itself —
+        // the stream endpoint replays the run's lines from the start, so that
+        // recovers cleanly. Only a CLOSED socket is actually fatal; treating
+        // every onerror as failure would report a false error on a live run.
+        if (source.readyState !== EventSource.CLOSED) return;
+        finish('Lost contact with the email check — it may still be running.', 'error');
+      };
+    } catch (err) {
+      finish(err instanceof Error ? err.message : String(err), 'error');
+    }
   };
 
   const [toasts, setToasts] = useState<ToastMsg[]>([]);
@@ -299,6 +417,7 @@ function Dashboard() {
 
   useEffect(() => {
     if (theme === 'pulse') document.documentElement.setAttribute('data-theme', 'pulse');
+    else if (theme === 'cyber') document.documentElement.setAttribute('data-theme', 'cyber');
     else document.documentElement.removeAttribute('data-theme');
     localStorage.setItem('visual_theme', theme);
   }, [theme]);
@@ -511,7 +630,7 @@ function Dashboard() {
       const reduce = prefersReducedMotion();
       gsap.from(viewFadeRef.current, { opacity: 0, y: 4, duration: reduce ? 0 : 0.18, ease: 'power2.out' });
     },
-    { dependencies: [view] }
+    { dependencies: [view, homeMode] }
   );
 
   const handleExport = async () => {
@@ -528,10 +647,27 @@ function Dashboard() {
     setEditOpen(true);
   };
 
+  const handleOpenRole = useCallback(
+    (app: Application) => {
+      if (typeof document !== 'undefined' && 'startViewTransition' in document) {
+        (document as any).startViewTransition(() => navigate(`/role/${app.id}`));
+      } else {
+        navigate(`/role/${app.id}`);
+      }
+    },
+    [navigate]
+  );
+
   // ---------- render ----------
 
   return (
-    <div className="mx-auto grid max-w-[1400px] gap-x-10 px-6 pb-32 pt-8 sm:px-10 md:grid-cols-[220px_minmax(0,1fr)] md:pb-24 md:pt-0">
+    <div
+      className={`mx-auto grid max-w-[1400px] transition-all duration-200 px-6 pb-32 pt-8 sm:px-10 ${
+        sidebarCollapsed
+          ? 'md:grid-cols-[72px_minmax(0,1fr)] gap-x-6'
+          : 'md:grid-cols-[220px_minmax(0,1fr)] gap-x-10'
+      } md:pb-24 md:pt-0`}
+    >
       {wallpaper && <Wallpaper dim={wallpaperDim} />}
       <PageHeader
         view={view}
@@ -546,6 +682,8 @@ function Dashboard() {
           navigate('/');
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
+        sidebarCollapsed={sidebarCollapsed}
+        onToggleSidebar={handleToggleSidebar}
       />
 
       <Sidebar
@@ -561,14 +699,8 @@ function Dashboard() {
         onSetTagF={setTagF}
         dark={dark}
         onToggleDark={() => setDark((d) => !d)}
-        theme={theme}
-        onToggleTheme={() => setTheme((t) => (t === 'pulse' ? 'bauhaus' : 'pulse'))}
-        wallpaper={wallpaper}
-        onToggleWallpaper={() => setWallpaper((w) => !w)}
-        wallpaperDim={wallpaperDim}
-        onSetWallpaperDim={setWallpaperDim}
-        sound={sound}
-        onToggleSound={() => setSound((s) => !s)}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={handleToggleSidebar}
       />
 
       <MobileNav
@@ -584,14 +716,6 @@ function Dashboard() {
         onSetTagF={setTagF}
         dark={dark}
         onToggleDark={() => setDark((d) => !d)}
-        theme={theme}
-        onToggleTheme={() => setTheme((t) => (t === 'pulse' ? 'bauhaus' : 'pulse'))}
-        wallpaper={wallpaper}
-        onToggleWallpaper={() => setWallpaper((w) => !w)}
-        wallpaperDim={wallpaperDim}
-        onSetWallpaperDim={setWallpaperDim}
-        sound={sound}
-        onToggleSound={() => setSound((s) => !s)}
       />
 
       <main className="min-w-0">
@@ -607,20 +731,74 @@ function Dashboard() {
       )}
 
       {view === 'list' && (
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-black/[0.06] dark:border-white/[0.08] pb-4">
+          <div className="flex items-center gap-1 rounded-full border border-black/[0.08] dark:border-white/[0.1] bg-panel/80 p-1 shadow-[0_2px_12px_rgba(0,0,0,0.03)] backdrop-blur-md">
+            <button
+              type="button"
+              onClick={() => {
+                playSound('tick');
+                setHomeMode('dashboard');
+              }}
+              className={`inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-mono font-bold uppercase tracking-wider transition-all duration-200 ${
+                homeMode === 'dashboard'
+                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-[0_4px_14px_rgba(37,99,235,0.35)] -translate-y-0.5'
+                  : 'text-ink-soft hover:text-ink hover:bg-panel-2/60'
+              }`}
+            >
+              <Icon.Zap className="h-3.5 w-3.5" />
+              <span>Overview</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                playSound('tick');
+                setHomeMode('pipeline');
+              }}
+              className={`inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-mono font-bold uppercase tracking-wider transition-all duration-200 ${
+                homeMode === 'pipeline'
+                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-[0_4px_14px_rgba(37,99,235,0.35)] -translate-y-0.5'
+                  : 'text-ink-soft hover:text-ink hover:bg-panel-2/60'
+              }`}
+            >
+              <Icon.Board className="h-3.5 w-3.5" />
+              <span>Pipeline ({apps.length})</span>
+            </button>
+          </div>
+
+          <div className="flex items-center gap-3 text-xs font-mono text-ink-faint">
+            <span
+              className="flex items-center gap-1.5"
+              title={notionError ? `Notion: ${notionError}` : notionOn ? 'Notion mirror active' : 'Notion offline'}
+            >
+              <span className={`h-2 w-2 rounded-full ${notionError ? 'bg-rose-500' : notionOn ? 'bg-emerald-500' : 'bg-neutral'}`} />
+              Notion {notionError ? 'error' : notionOn ? 'synced' : 'not configured'}
+            </span>
+            <span className="hidden sm:inline text-ink-faint/40">·</span>
+            <span className="hidden sm:inline">
+              <kbd className="font-mono text-ink rounded bg-panel-2 px-1.5 py-0.5 text-[11px]">Ctrl+K</kbd> palette
+            </span>
+            <span className="hidden sm:inline text-ink-faint/40">·</span>
+            <span className="hidden sm:inline">
+              <kbd className="font-mono text-ink rounded bg-panel-2 px-1.5 py-0.5 text-[11px]">Ctrl+J</kbd> console
+            </span>
+          </div>
+        </div>
+      )}
+
+      {view === 'list' && loading && (
+        <DashboardSkeleton />
+      )}
+
+      {view === 'list' && !loading && homeMode === 'pipeline' && (
         <>
           <DeadlineCountdown
             apps={apps}
-            onOpen={(a) => {
-              setEditing(a);
-              setEditOpen(true);
-            }}
+            onOpen={handleOpenRole}
           />
           <InterviewBanner
             apps={apps}
-            onOpen={(a) => {
-              setEditing(a);
-              setEditOpen(true);
-            }}
+            onOpen={handleOpenRole}
             onSchedule={(a) => {
               setInterviewingApp(a);
             }}
@@ -628,10 +806,7 @@ function Dashboard() {
           <EventsBanner />
           <CommandCentre
             apps={apps}
-            onOpen={(a) => {
-              setEditing(a);
-              setEditOpen(true);
-            }}
+            onOpen={handleOpenRole}
             onOpenTerminal={() => setTerminalOpen(true)}
             onAutoPicked={refresh}
           />
@@ -641,7 +816,7 @@ function Dashboard() {
       {/* Pipeline tabs, search, and this status strip only apply to the role
           list itself — Insights and Agenda both mix every status together by
           construction, so a single-status filter doesn't mean anything there. */}
-      {view === 'list' && (
+      {view === 'list' && !loading && homeMode === 'pipeline' && (
         <>
           <Pipeline apps={apps} active={statusF} onPick={setStatusF} />
 
@@ -748,18 +923,37 @@ function Dashboard() {
           would otherwise blank the outreach sections entirely. */}
       <div ref={viewFadeRef}>
       {isOutreachView(view) ? (
-        <OutreachView
-          kind={VIEW_KIND[view]}
-          entries={outreach}
-          apps={apps}
-          addOpen={outreachAddOpen}
-          onCloseAdd={() => setOutreachAddOpen(false)}
-          onChanged={refresh}
-          toast={toast}
-        />
-      ) : loading ? (
-        <SkeletonRows />
-      ) : view === 'insights' ? (
+        <Suspense fallback={<SkeletonPanels />}>
+          <OutreachView
+            kind={VIEW_KIND[view]}
+            entries={outreach}
+            apps={apps}
+            addOpen={outreachAddOpen}
+            onCloseAdd={() => setOutreachAddOpen(false)}
+            onChanged={refresh}
+            toast={toast}
+          />
+        </Suspense>
+      ) : /* Ahead of the `loading` guard below: Settings reads none of the
+             application data, so making it wait on that fetch would blank the
+             page — including the server log, which is exactly what you want to
+             see when a fetch is what's broken. */
+      view === 'settings' ? (
+        <Suspense fallback={<SkeletonPanels />}>
+          <Settings
+            dark={dark}
+            onToggleDark={() => setDark((d) => !d)}
+            theme={theme}
+            onSelectTheme={setTheme}
+            wallpaper={wallpaper}
+            onToggleWallpaper={() => setWallpaper((w) => !w)}
+            wallpaperDim={wallpaperDim}
+            onSetWallpaperDim={setWallpaperDim}
+            sound={sound}
+            onToggleSound={() => setSound((s) => !s)}
+          />
+        </Suspense>
+      ) : loading ? null : view === 'insights' ? (
         <Suspense fallback={<SkeletonPanels />}>
           <Insights apps={apps} onOpenTerminal={() => setTerminalOpen(true)} />
         </Suspense>
@@ -768,16 +962,49 @@ function Dashboard() {
           <Study apps={apps} onOpenTerminal={() => setTerminalOpen(true)} />
         </Suspense>
       ) : view === 'agenda' ? (
-        <AgendaView
-          apps={apps}
-          outreach={outreach}
-          onOpenApp={(a) => {
-            setEditing(a);
-            setEditOpen(true);
-          }}
-          onOpenOutreach={(e) => setView(e.kind === 'company' ? 'companies' : 'recruiters')}
-          toast={toast}
-        />
+        <Suspense fallback={<SkeletonPanels />}>
+          <AgendaView
+            apps={apps}
+            outreach={outreach}
+            onOpenApp={handleOpenRole}
+            onOpenOutreach={(e) => setView(e.kind === 'company' ? 'companies' : 'recruiters')}
+            toast={toast}
+          />
+        </Suspense>
+      ) : view === 'list' && homeMode === 'dashboard' ? (
+        <>
+          <KineticLoader
+            forceShow={replayLoader}
+            onComplete={() => setReplayLoader(false)}
+          />
+          <DeadlineCountdown
+            apps={apps}
+            onOpen={handleOpenRole}
+          />
+          <HomeDashboard
+            apps={apps}
+            notionOn={notionOn}
+            notionError={notionError}
+            onOpenApp={handleOpenRole}
+            onAddNew={openNew}
+            onGmailFetch={handleGmailFetch}
+            onOpenTerminal={() => setTerminalOpen(true)}
+            onGoToInsights={() => setView('insights')}
+            onOpenFolder={handleOpenFolder}
+            onSelectStage={(stage) => {
+              setStatusF(stage);
+              setHomeMode('pipeline');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            onSwitchToPipeline={() => {
+              playSound('tick');
+              setHomeMode('pipeline');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            onRefresh={refresh}
+            onReplayLoader={() => setReplayLoader(true)}
+          />
+        </>
       ) : filtered.length === 0 ? (
         <div className="panel-empty py-24 text-center">
           {apps.length === 0 ? (
@@ -799,10 +1026,7 @@ function Dashboard() {
         <Suspense fallback={<SkeletonRows />}>
           <BoardView
             apps={filtered}
-            onEdit={(a) => {
-              setEditing(a);
-              setEditOpen(true);
-            }}
+            onOpen={handleOpenRole}
             onStatusChange={handleStatusChange}
           />
         </Suspense>
@@ -878,44 +1102,67 @@ function Dashboard() {
       </footer>
       </main>
 
-      <EditModal
-        open={editOpen}
-        entry={editing}
-        onClose={() => {
-          setEditOpen(false);
-          setEditing(null);
-        }}
-        onSave={handleSave}
-        onDelete={(entry) => setConfirming(entry)}
-      />
+      {editOpen && (
+        <Suspense fallback={null}>
+          <EditModal
+            open={editOpen}
+            entry={editing}
+            onClose={() => {
+              setEditOpen(false);
+              setEditing(null);
+            }}
+            onSave={handleSave}
+            onDelete={(entry) => setConfirming(entry)}
+          />
+        </Suspense>
+      )}
 
-      <AppliedModal
-        entry={applying}
-        onCancel={() => setApplying(null)}
-        onConfirm={handleMarkApplied}
-      />
+      {applying && (
+        <Suspense fallback={null}>
+          <AppliedModal
+            entry={applying}
+            onCancel={() => setApplying(null)}
+            onConfirm={handleMarkApplied}
+          />
+        </Suspense>
+      )}
 
-      <ConfirmDelete
-        entry={confirming}
-        onCancel={() => setConfirming(null)}
-        onConfirm={handleDelete}
-      />
+      {confirming && (
+        <Suspense fallback={null}>
+          <ConfirmDelete
+            entry={confirming}
+            onCancel={() => setConfirming(null)}
+            onConfirm={handleDelete}
+          />
+        </Suspense>
+      )}
 
-      <AlertModal
-        message={alertQueue[0] ?? null}
-        onDismiss={() => setAlertQueue((q) => q.slice(1))}
-      />
+      {alertQueue.length > 0 && (
+        <Suspense fallback={null}>
+          <AlertModal
+            message={alertQueue[0] ?? null}
+            onDismiss={() => setAlertQueue((q) => q.slice(1))}
+          />
+        </Suspense>
+      )}
 
-      <TerminalPanel
-        open={terminalOpen}
-        onClose={() => setTerminalOpen(false)}
-        onFinished={refresh}
-        onRunningChange={setClaudeRunning}
-        gmailFetchSignal={gmailFetchSignal}
-      />
+      {terminalOpen && (
+        <Suspense fallback={null}>
+          <TerminalPanel
+            open={terminalOpen}
+            onClose={() => setTerminalOpen(false)}
+            onFinished={refresh}
+            onRunningChange={setClaudeRunning}
+          />
+        </Suspense>
+      )}
 
       <Toaster toasts={toasts} />
-      <Celebration celebration={celebration} />
+      {celebration && (
+        <Suspense fallback={null}>
+          <Celebration celebration={celebration} />
+        </Suspense>
+      )}
 
       {previewingApp && (
         <Suspense fallback={null}>
@@ -942,18 +1189,23 @@ function Dashboard() {
         </Suspense>
       )}
 
-      <CommandPalette
-        apps={apps}
-        view={view}
-        dark={dark}
-        visualTheme={theme}
-        onSetView={setView}
-        onToggleTheme={() => setDark((d) => !d)}
-        onToggleVisualTheme={() => setTheme((t) => (t === 'pulse' ? 'bauhaus' : 'pulse'))}
-        onAddNew={openNew}
-        onOpenTerminal={() => setTerminalOpen(true)}
-        onExportCsv={handleExport}
-      />
+      <Suspense fallback={null}>
+        <CommandPalette
+          apps={apps}
+          view={view}
+          dark={dark}
+          visualTheme={theme}
+          onSetView={setView}
+          onToggleTheme={() => setDark((d) => !d)}
+          onSelectVisualTheme={setTheme}
+          onToggleVisualTheme={() => setTheme((t) => (t === 'bauhaus' ? 'pulse' : t === 'pulse' ? 'cyber' : 'bauhaus'))}
+          sound={sound}
+          onToggleSound={() => setSound((s) => !s)}
+          onAddNew={openNew}
+          onOpenTerminal={() => setTerminalOpen(true)}
+          onExportCsv={handleExport}
+        />
+      </Suspense>
     </div>
   );
 }

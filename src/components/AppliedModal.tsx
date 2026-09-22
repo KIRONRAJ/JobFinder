@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useModalPresence } from '../lib/useModalPresence';
-import { Icon } from './Icons';
+import { AnimatedCheckmark } from './AnimatedCheckmark';
 import { useDialog } from '../useDialog';
 import type { Application } from '../types';
 
@@ -79,7 +79,7 @@ export function AppliedModal({ entry, onCancel, onConfirm }: Props) {
       >
         <div className="mb-1 flex items-center gap-2.5">
           <span className="flex h-7 w-7 items-center justify-center rounded-full bg-grass text-white">
-            <Icon.Check className="h-4 w-4" />
+            <AnimatedCheckmark className="h-4 w-4 text-white" strokeWidth={3} />
           </span>
           <h2 id="applied-title" className="text-title font-semibold tracking-[-0.02em]">
             {alreadyApplied ? 'Tracking details' : 'Mark as applied'}

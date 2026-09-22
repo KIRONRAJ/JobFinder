@@ -242,7 +242,7 @@ function KpiTile({
   );
 }
 
-/** The dashboard's top-of-page KPI strip — the four numbers Kironraj checks
+/** The dashboard's top-of-page KPI strip — the four numbers Jordan checks
  *  first, before any chart. 2-up on mobile so it stays a glance, not a full
  *  screen of tiles; 4-up once there's room. Values were previously split
  *  between a "This week vs last"/"Average response time" pair and a separate

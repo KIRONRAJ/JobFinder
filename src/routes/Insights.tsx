@@ -4,7 +4,6 @@ import { TabStrip } from '../components/TabStrip';
 import { AnalyticsView } from '../components/AnalyticsView';
 import { AnalysisView } from '../components/AnalysisView';
 import { MarketView } from '../components/MarketView';
-import { AuditView } from '../components/AuditView';
 import { LearningLoopPanel } from '../components/LearningLoopPanel';
 import { LearningLoopReportPanel } from '../components/LearningLoopReportPanel';
 import { UpskillReportPanel } from '../components/UpskillReportPanel';
@@ -76,10 +75,13 @@ export function Insights({ apps, onOpenTerminal }: Props) {
         </div>
       )}
 
+      {/* The raw event log used to sit under this digest. It moved to
+          Settings → Audit log (Sep 2026) with real filters — it's a tracing
+          surface, not a read on how the search is going, and the two were
+          reading as one thing here. */}
       {tab === 'activity' && (
         <div>
           <WeeklyDigestPanel apps={apps} />
-          <AuditView />
         </div>
       )}
     </div>

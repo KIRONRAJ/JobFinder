@@ -18,13 +18,12 @@ test('resolvePython: returns a valid python command', () => {
   assert.ok(py.includes('python'));
 });
 
-test('loadCandidateFacts: loads non-empty candidate facts containing key grounding truths', async () => {
+test('loadCandidateFacts: never throws, even when the facts files do not exist on disk', async () => {
+  // Candidate Key Facts.md lives outside this repo (a private "Project Notes"
+  // folder, per PRODUCT.md) — a fresh clone won't have it, so this only
+  // asserts the loader degrades gracefully, not any specific fact content.
   const facts = await loadCandidateFacts();
-  assert.ok(facts.length > 500);
-  assert.match(facts, /Kironraj/i);
-  assert.match(facts, /Whitecliffe College/i);
-  assert.match(facts, /Calicut/i);
-  assert.match(facts, /Post Study Work Visa/i);
+  assert.equal(typeof facts, 'string');
 });
 
 test('fetchJobText: returns empty string for empty url or handles errors gracefully', async () => {
@@ -57,7 +56,7 @@ test('generateTailoredDocSpec: parses Gemini response into valid doc spec', asyn
     workHistory: [
       {
         role: 'L2 NOC Engineer',
-        company: 'Keralavision Broadband Pvt Limited',
+        company: 'Northline Broadband Pvt Limited',
         period: '11/2017 – 06/2019 | Thrissur, Kerala',
         bullets: ['Monitored network telemetry']
       }
@@ -65,7 +64,7 @@ test('generateTailoredDocSpec: parses Gemini response into valid doc spec', asyn
     education: [
       {
         title: 'Master of Information Technology (Cyber Security specialisation)',
-        institution: 'Whitecliffe College, Wellington | Completed with Merit (July 2026)',
+        institution: 'Riverside Institute of Technology, Wellington | Completed with Merit (July 2026)',
         bullets: ['Master’s Research Project: Replay Attack Prevention in Smart Car IoT Systems.']
       }
     ],
@@ -75,11 +74,11 @@ test('generateTailoredDocSpec: parses Gemini response into valid doc spec', asyn
       addressee: 'Hiring Manager\nAcme Corp\nWellington',
       greeting: 'Dear Hiring Team,',
       paragraphs: [
-        'I am writing to express my strong interest in the Systems Support Specialist position at Acme Corp. Living locally in Trentham, Upper Hutt, and holding a Master of Information Technology completed with Merit from Whitecliffe College, Wellington, I bring authentic Tier 1 and Tier 2 operations experience.',
-        'Throughout my career at Keralavision Broadband and Poornam Infovision, I have managed high-reliability environments, investigated complex anomalies, and provided empathetic support under strict response SLAs.',
+        'I am writing to express my strong interest in the Systems Support Specialist position at Acme Corp. Living locally in Petone, Lower Hutt, and holding a Master of Information Technology completed with Merit from Riverside Institute of Technology, Wellington, I bring authentic Tier 1 and Tier 2 operations experience.',
+        'Throughout my career at Northline Broadband and Cascade Infovision, I have managed high-reliability environments, investigated complex anomalies, and provided empathetic support under strict response SLAs.',
         'I hold full open work rights on a 3-year Post Study Work Visa (Open Work Visa) and a full clean New Zealand driver licence. I am eager to contribute to Acme Corp.'
       ],
-      signoff: 'Sincerely,\nKironraj Odatt Peringode'
+      signoff: 'Sincerely,\nJordan Smith'
     }
   };
 
@@ -111,7 +110,7 @@ test('generateTailoredDocSpec: parses Gemini response into valid doc spec', asyn
     assert.equal(spec.outputDir, path.join('Pending to Apply', 'Acme Corp'));
     assert.ok(spec.coverLetter);
     assert.equal(spec.coverLetter.greeting, 'Dear Hiring Team,');
-    assert.equal(spec.coverLetter.signoff, 'Sincerely,\nKironraj Odatt Peringode');
+    assert.equal(spec.coverLetter.signoff, 'Sincerely,\nJordan Smith');
     // Verify ServiceNow was stripped
     assert.equal(spec.certifications.length, 1);
     assert.equal(spec.certifications[0], 'Red Hat Certified System Administrator (RHCSA)');
@@ -174,7 +173,7 @@ test('processSingleCvRequest: executes end-to-end flow and updates data & audit 
                     date: '5 September 2026',
                     greeting: 'Dear Hiring Team,',
                     paragraphs: ['Paragraph 1'],
-                    signoff: 'Sincerely,\nKironraj Odatt Peringode'
+                    signoff: 'Sincerely,\nJordan Smith'
                   }
                 })
               }
@@ -226,5 +225,47 @@ test('processSingleCvRequest: executes end-to-end flow and updates data & audit 
   } finally {
     globalThis.fetch = originalFetch;
     await fsPromises.rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
+// Regression: this used to hardcode 'Pending to Apply/<company>' and then
+// overwrite entry.folderPath with it, so regenerating a CV for a role already
+// at Applied/ or Interview/ silently dragged its folderPath backwards while the
+// documents stayed put. That is the most likely source of the five
+// tracker/disk mismatches found in the 15 Sep 2026 cleanup audit.
+function stubGemini() {
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({
+      candidates: [
+        { content: { parts: [{ text: JSON.stringify({ company: 'Acme Ltd', role: 'Analyst', coverLetter: {} }) }] } },
+      ],
+    }),
+  });
+}
+
+test('generateTailoredDocSpec: writes into the entry\'s existing folder', async () => {
+  stubGemini();
+  for (const folderPath of ['Applied/Acme Ltd', 'Interview/Acme Ltd', 'Declined/Acme Ltd']) {
+    const spec = await generateTailoredDocSpec({
+      entry: { company: 'Acme Ltd', role: 'Analyst', folderPath },
+      candidateFacts: 'x',
+      apiKey: 'K',
+    });
+    assert.equal(spec.outputDir, folderPath, 'must not drag the folder back to Pending to Apply');
+  }
+});
+
+test('generateTailoredDocSpec: falls back to Pending to Apply when folderPath is unusable', async () => {
+  stubGemini();
+  // Empty, absolute, and traversal paths all fall back rather than being trusted —
+  // folderPath is user-editable in the Add/Edit form.
+  for (const folderPath of ['', undefined, '   ', '/etc', '../../etc', 'Applied/../../etc']) {
+    const spec = await generateTailoredDocSpec({
+      entry: { company: 'Acme Ltd', role: 'Analyst', folderPath },
+      candidateFacts: 'x',
+      apiKey: 'K',
+    });
+    assert.equal(spec.outputDir, 'Pending to Apply/Acme Ltd', `should reject ${JSON.stringify(folderPath)}`);
   }
 });

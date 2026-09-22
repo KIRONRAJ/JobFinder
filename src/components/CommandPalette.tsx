@@ -7,15 +7,19 @@ import { StatusIcon } from './Badges';
 import { VIEW_META } from './Sidebar';
 import { resolveEvidenceMap } from '../lib/evidenceState';
 import { playSound } from '../lib/sound';
+import type { VisualTheme } from './ThemeSelector';
 
 interface Props {
   apps: Application[];
   view: View;
   dark: boolean;
-  visualTheme: 'bauhaus' | 'pulse';
+  visualTheme: VisualTheme;
+  sound?: boolean;
   onSetView: (view: View) => void;
   onToggleTheme: () => void;
+  onSelectVisualTheme?: (theme: VisualTheme) => void;
   onToggleVisualTheme: () => void;
+  onToggleSound?: () => void;
   onAddNew: () => void;
   onOpenTerminal: () => void;
   onExportCsv: () => void;
@@ -45,9 +49,12 @@ export function CommandPalette({
   view,
   dark,
   visualTheme,
+  sound,
   onSetView,
   onToggleTheme,
+  onSelectVisualTheme,
   onToggleVisualTheme,
+  onToggleSound,
   onAddNew,
   onOpenTerminal,
   onExportCsv,
@@ -121,6 +128,17 @@ export function CommandPalette({
         </Command.Empty>
 
         <Command.Group heading="Actions" className={groupClass}>
+          <Command.Item onSelect={() => run(() => navigate('/study?tab=sot&sub=floor'))} className={itemClass}>
+            <Icon.Target className="h-4 w-4 text-red-500" />
+            SOT Live Floor Mode (Meet &amp; Greet 14 Sep)
+            <span className="ml-auto rounded-full bg-red-500/10 px-2 py-0.5 text-[10px] font-bold text-red-600 dark:text-red-400">
+              Live
+            </span>
+          </Command.Item>
+          <Command.Item onSelect={() => run(() => navigate('/study?tab=sot&sub=playbook'))} className={itemClass}>
+            <Icon.Sparkles className="h-4 w-4 text-accent" />
+            SOT Employer Interview Playbook
+          </Command.Item>
           <Command.Item onSelect={() => run(onOpenTerminal)} className={itemClass}>
             <Icon.Terminal className="h-4 w-4 text-accent" />
             New terminal — ask Claude anything jobhq-related
@@ -128,12 +146,22 @@ export function CommandPalette({
           </Command.Item>
           <Command.Item onSelect={() => run(onAddNew)} className={itemClass}>
             <Icon.Plus className="h-4 w-4 text-accent" />
-            Add application manually
+            Add application manually (or Smart AI Ingest)
           </Command.Item>
           <Command.Item onSelect={() => run(onExportCsv)} className={itemClass}>
             <Icon.Download className="h-4 w-4 text-accent" />
             Export everything to CSV
           </Command.Item>
+          {onToggleSound && (
+            <Command.Item onSelect={() => run(onToggleSound)} className={itemClass}>
+              {sound ? (
+                <Icon.Volume className="h-4 w-4 text-accent" />
+              ) : (
+                <Icon.Mute className="h-4 w-4 text-accent" />
+              )}
+              {sound ? 'Disable' : 'Enable'} UI tactile sound effects
+            </Command.Item>
+          )}
           <Command.Item onSelect={() => run(onToggleTheme)} className={itemClass}>
             {dark ? (
               <Icon.Sun className="h-4 w-4 text-accent" />
@@ -142,14 +170,42 @@ export function CommandPalette({
             )}
             Switch to {dark ? 'light' : 'dark'} theme
           </Command.Item>
-          <Command.Item onSelect={() => run(onToggleVisualTheme)} className={itemClass}>
-            {visualTheme === 'pulse' ? (
-              <Icon.Square className="h-4 w-4 text-accent" />
-            ) : (
+          {onSelectVisualTheme ? (
+            <>
+              {visualTheme !== 'bauhaus' && (
+                <Command.Item
+                  onSelect={() => run(() => onSelectVisualTheme('bauhaus'))}
+                  className={itemClass}
+                >
+                  <Icon.Square className="h-4 w-4 text-accent" />
+                  Switch to Bauhaus theme (Architectural)
+                </Command.Item>
+              )}
+              {visualTheme !== 'pulse' && (
+                <Command.Item
+                  onSelect={() => run(() => onSelectVisualTheme('pulse'))}
+                  className={itemClass}
+                >
+                  <Icon.Sparkle className="h-4 w-4 text-accent" />
+                  Switch to Pulse theme (Ambient Glow)
+                </Command.Item>
+              )}
+              {visualTheme !== 'cyber' && (
+                <Command.Item
+                  onSelect={() => run(() => onSelectVisualTheme('cyber'))}
+                  className={itemClass}
+                >
+                  <Icon.Terminal className="h-4 w-4 text-accent" />
+                  Switch to Cyber Obsidian theme (Matrix Neon)
+                </Command.Item>
+              )}
+            </>
+          ) : (
+            <Command.Item onSelect={() => run(onToggleVisualTheme)} className={itemClass}>
               <Icon.Sparkle className="h-4 w-4 text-accent" />
-            )}
-            Switch to {visualTheme === 'pulse' ? 'Bauhaus' : 'Pulse'} visual theme
-          </Command.Item>
+              Cycle visual theme (Bauhaus / Pulse / Cyber)
+            </Command.Item>
+          )}
           {/* Driven off the same array the sidebar renders, so the palette can
               never again drift behind the set of views that actually exist. */}
           {VIEW_META.filter((v) => v.key !== view).map(({ key, label, icon: IconEl }) => (
@@ -163,6 +219,21 @@ export function CommandPalette({
               Go to {label}
             </Command.Item>
           ))}
+        </Command.Group>
+
+        <Command.Group heading="Pipeline Quick Filters" className={groupClass}>
+          <Command.Item onSelect={() => run(() => navigate('/?status=applied'))} className={itemClass}>
+            <Icon.Clock className="h-4 w-4 text-blue-500" />
+            Show Applied Applications Only
+          </Command.Item>
+          <Command.Item onSelect={() => run(() => navigate('/?status=interview'))} className={itemClass}>
+            <Icon.Chat className="h-4 w-4 text-amber-500" />
+            Show Interview Stage Roles Only
+          </Command.Item>
+          <Command.Item onSelect={() => run(() => navigate('/insights?tab=funnel'))} className={itemClass}>
+            <Icon.Gauge className="h-4 w-4 text-grass" />
+            Pipeline Conversion Funnel &amp; Velocity
+          </Command.Item>
         </Command.Group>
 
         <Command.Group heading="Applications" className={groupClass}>

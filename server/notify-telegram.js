@@ -4,11 +4,11 @@
 // which already append their own audit-log lines by convention. See
 // docs/superpowers/specs/2026-09-03-telegram-notifications-design.md.
 
-import { execFile } from 'node:child_process';
 import fsPromises from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { telegramApi, telegramUpload, telegramDownloadToFile } from './telegram-api.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_DIR = path.resolve(__dirname, '..');
@@ -62,7 +62,12 @@ export const ACTION_LABELS = {
   'delete-local': { emoji: '🗑️', label: 'Removed locally' },
 };
 
+export const IGNORED_ACTIONS = new Set([
+  'event-completed',
+]);
+
 export function formatMessage(event) {
+  if (!event || IGNORED_ACTIONS.has(event.action)) return null;
   const { action, detail, matchKey, entryId, actor } = event;
   const meta = ACTION_LABELS[action] || { emoji: '🔔', label: action.replace(/-/g, ' ') };
   const lines = [`${meta.emoji} ${meta.label}`];
@@ -77,201 +82,112 @@ export function formatMessage(event) {
   return lines.join('\n');
 }
 
-export function sendTelegram(text, { token, chatId, replyMarkup, execFileImpl = execFile } = {}) {
-  return new Promise((resolve) => {
-    if (!token || !chatId) {
-      resolve();
-      return;
+// Telegram rejects any sendMessage over 4096 chars outright with
+// "Bad Request: message is too long". 3800 leaves headroom.
+const TELEGRAM_CHUNK = 3800;
+
+/**
+ * Split text into sendable pieces, preferring paragraph boundaries.
+ *
+ * A single paragraph can itself blow the limit — a pasted stack trace, a long
+ * CLI error, a /today listing with no blank lines — so those get hard-split at
+ * a newline rather than emitted as one oversized chunk Telegram will refuse.
+ */
+export function splitForTelegram(text, limit = TELEGRAM_CHUNK) {
+  if (text.length <= limit) return [text];
+  const chunks = [];
+  let cur = '';
+  const flush = () => {
+    if (cur) chunks.push(cur);
+    cur = '';
+  };
+
+  for (const para of text.split('\n\n')) {
+    let p = para;
+    while (p.length > limit) {
+      flush();
+      // Prefer a line break near the limit; fall back to a hard cut if the
+      // paragraph is one enormous unbroken line.
+      let cut = p.lastIndexOf('\n', limit);
+      if (cut < limit * 0.5) cut = limit;
+      chunks.push(p.slice(0, cut));
+      p = p.slice(cut).replace(/^\n/, '');
     }
-
-    const args = [
-      '-s',
-      '--max-time',
-      '10',
-      `https://api.telegram.org/bot${token}/sendMessage`,
-      '-d',
-      `chat_id=${encodeURIComponent(chatId)}`,
-      // Pre-encoded ourselves (via -d, not --data-urlencode) so the argv
-      // element is pure ASCII: on Windows, execFile mangles non-ASCII
-      // bytes (emoji, em dashes, macrons — i.e. every real message here)
-      // when building the process's command line, turning them into U+FFFD
-      // before curl ever sees them. Percent-encoding sidesteps that entirely.
-      '-d',
-      `text=${encodeURIComponent(text)}`,
-    ];
-
-    if (replyMarkup) {
-      args.push('-d', `reply_markup=${encodeURIComponent(JSON.stringify(replyMarkup))}`);
-    }
-
-    execFileImpl(
-      'curl',
-      args,
-      (err, stdout) => {
-        if (err) {
-          console.error('telegram notify failed:', err.message);
-          resolve();
-          return;
-        }
-        try {
-          const parsed = JSON.parse(stdout);
-          if (!parsed.ok) {
-            console.error('telegram notify failed:', parsed.description || 'unknown error');
-          }
-        } catch {
-          console.error('telegram notify failed: could not parse Telegram API response');
-        }
-        resolve();
-      }
-    );
-  });
+    if (!p) continue;
+    if (cur && `${cur}\n\n${p}`.length > limit) flush();
+    cur = cur ? `${cur}\n\n${p}` : p;
+  }
+  flush();
+  return chunks;
 }
 
-export function sendTelegramDocument(filePath, { caption = '', token, chatId, execFileImpl = execFile } = {}) {
-  return new Promise((resolve) => {
-    if (!token || !chatId || !filePath) {
-      resolve({ ok: false, error: 'missing parameters' });
-      return;
-    }
-
-    const normalizedPath = filePath.split('\\').join('/');
-    const args = [
-      '-s',
-      '--max-time',
-      '30',
-      `https://api.telegram.org/bot${token}/sendDocument`,
-      '-F',
-      `chat_id=${chatId}`,
-      '-F',
-      `document=@${normalizedPath}`,
-    ];
-
-    if (caption) {
-      args.push('--form-string', `caption=${caption}`);
-    }
-
-    execFileImpl('curl', args, { timeout: 35000 }, (err, stdout) => {
-      if (err) {
-        console.error('telegram sendDocument failed:', err.message);
-        resolve({ ok: false, error: err.message });
-        return;
-      }
-      try {
-        const parsed = JSON.parse(stdout);
-        if (!parsed.ok) {
-          console.error('telegram sendDocument error:', parsed.description || 'unknown error');
-          resolve({ ok: false, error: parsed.description });
-          return;
-        }
-        resolve({ ok: true, result: parsed.result });
-      } catch {
-        console.error('telegram sendDocument: failed to parse response');
-        resolve({ ok: false, error: 'could not parse response' });
-      }
-    });
-  });
+/**
+ * Send a message, splitting it if it exceeds Telegram's limit.
+ *
+ * The split lives HERE rather than at the call sites because the call sites
+ * kept getting it wrong: /today (7,094 chars against a 4,096 limit) and the
+ * 8:30am morning briefing were both silently failing — the briefing since at
+ * least 8 Sep 2026 — while /ask and /cl happened to route through a separate
+ * chunking helper and worked. One guard in the shared sender means a new
+ * command can't reintroduce it.
+ */
+export async function sendTelegram(text, { token, chatId, replyMarkup, fetchImpl } = {}) {
+  if (!token || !chatId) return;
+  const chunks = splitForTelegram(String(text ?? ''));
+  for (let i = 0; i < chunks.length; i++) {
+    const params = { chat_id: chatId, text: chunks[i] };
+    // Keyboard goes on the final chunk only, so it lands under the last
+    // message rather than being repeated between fragments.
+    if (replyMarkup && i === chunks.length - 1) params.reply_markup = replyMarkup;
+    // eslint-disable-next-line no-await-in-loop -- fragments must arrive in order
+    await telegramApi('sendMessage', params, { token, fetchImpl, label: 'notify' });
+  }
 }
 
-export function sendTelegramQuiz(
+export async function sendTelegramDocument(
+  filePath,
+  { caption = '', token, chatId, fetchImpl } = {}
+) {
+  if (!token || !chatId || !filePath) return { ok: false, error: 'missing parameters' };
+  const body = await telegramUpload(
+    'sendDocument',
+    { filePath, field: 'document', fields: { chat_id: chatId, caption } },
+    { token, fetchImpl, label: 'sendDocument' }
+  );
+  return body.ok ? { ok: true, result: body.result } : { ok: false, error: body.description };
+}
+
+export async function sendTelegramQuiz(
   chatId,
   question,
   options,
   correctOptionId,
   explanation = '',
-  { token, execFileImpl = execFile } = {}
+  { token, fetchImpl } = {}
 ) {
-  return new Promise((resolve) => {
-    if (!token || !chatId || !question || !Array.isArray(options)) {
-      resolve({ ok: false, error: 'missing parameters' });
-      return;
-    }
-
-    const args = [
-      '-s',
-      '--max-time',
-      '15',
-      `https://api.telegram.org/bot${token}/sendPoll`,
-      '-d',
-      `chat_id=${encodeURIComponent(chatId)}`,
-      '-d',
-      `question=${encodeURIComponent(question)}`,
-      '-d',
-      `options=${encodeURIComponent(JSON.stringify(options))}`,
-      '-d',
-      'type=quiz',
-      '-d',
-      `correct_option_id=${encodeURIComponent(String(correctOptionId))}`,
-      '-d',
-      'is_anonymous=false',
-    ];
-
-    if (explanation) {
-      args.push('-d', `explanation=${encodeURIComponent(explanation.slice(0, 200))}`);
-    }
-
-    execFileImpl('curl', args, { timeout: 20000 }, (err, stdout) => {
-      if (err) {
-        console.error('telegram sendQuiz failed:', err.message);
-        resolve({ ok: false, error: err.message });
-        return;
-      }
-      try {
-        const parsed = JSON.parse(stdout);
-        if (!parsed.ok) {
-          console.error('telegram sendQuiz error:', parsed.description || 'unknown error');
-          resolve({ ok: false, error: parsed.description });
-          return;
-        }
-        resolve({ ok: true, result: parsed.result });
-      } catch {
-        console.error('telegram sendQuiz: could not parse response');
-        resolve({ ok: false, error: 'could not parse response' });
-      }
-    });
-  });
+  if (!token || !chatId || !question || !Array.isArray(options)) {
+    return { ok: false, error: 'missing parameters' };
+  }
+  const params = {
+    chat_id: chatId,
+    question,
+    options,
+    type: 'quiz',
+    correct_option_id: correctOptionId,
+    is_anonymous: false,
+  };
+  if (explanation) params.explanation = explanation.slice(0, 200);
+  const body = await telegramApi('sendPoll', params, { token, fetchImpl, label: 'sendQuiz' });
+  return body.ok ? { ok: true, result: body.result } : { ok: false, error: body.description };
 }
 
-export function downloadTelegramFile(fileId, destPath, { token, execFileImpl = execFile } = {}) {
-  return new Promise((resolve) => {
-    if (!token || !fileId || !destPath) {
-      resolve({ ok: false, error: 'missing parameters' });
-      return;
-    }
-
-    const getUrl = `https://api.telegram.org/bot${token}/getFile?file_id=${encodeURIComponent(fileId)}`;
-    execFileImpl('curl', ['-s', '--max-time', '15', getUrl], { timeout: 20000 }, (err, stdout) => {
-      if (err) {
-        console.error('telegram getFile failed:', err.message);
-        resolve({ ok: false, error: err.message });
-        return;
-      }
-      try {
-        const parsed = JSON.parse(stdout);
-        if (!parsed.ok || !parsed.result?.file_path) {
-          resolve({ ok: false, error: parsed.description || 'file_path missing' });
-          return;
-        }
-        const filePath = parsed.result.file_path;
-        const downloadUrl = `https://api.telegram.org/file/bot${token}/${filePath}`;
-        const normalizedDest = destPath.split('\\').join('/');
-        execFileImpl(
-          'curl',
-          ['-s', '--max-time', '60', downloadUrl, '-o', normalizedDest],
-          { timeout: 70000 },
-          (dlErr) => {
-            if (dlErr) {
-              console.error('telegram file download failed:', dlErr.message);
-              resolve({ ok: false, error: dlErr.message });
-              return;
-            }
-            resolve({ ok: true, localPath: destPath });
-          }
-        );
-      } catch {
-        resolve({ ok: false, error: 'failed to parse getFile response' });
-      }
-    });
-  });
+export async function downloadTelegramFile(fileId, destPath, { token, fetchImpl } = {}) {
+  if (!token || !fileId || !destPath) return { ok: false, error: 'missing parameters' };
+  const meta = await telegramApi('getFile', { file_id: fileId }, { token, fetchImpl, label: 'getFile' });
+  if (!meta.ok || !meta.result?.file_path) {
+    return { ok: false, error: meta.description || 'file_path missing' };
+  }
+  return telegramDownloadToFile(meta.result.file_path, destPath, { token, fetchImpl });
 }
 
 export async function findCvDocument(matchKey, entryId, { careerDir = CAREER_DIR, dataFile = DEFAULT_DATA_FILE } = {}) {
@@ -381,7 +297,7 @@ export async function readNewBatch(auditFilePath, offset, { maxBacklogBytes = 32
 // Sends one Telegram message per event, in order. A bad event (malformed
 // shape — e.g. missing `action`) is logged and skipped rather than aborting
 // the whole batch, so one unformattable line can never stall the offset.
-export async function sendEvents(events, { token, chatId, execFileImpl, careerDir = CAREER_DIR, dataFile = DEFAULT_DATA_FILE } = {}) {
+export async function sendEvents(events, { token, chatId, fetchImpl, careerDir = CAREER_DIR, dataFile = DEFAULT_DATA_FILE } = {}) {
   for (const event of events) {
     try {
       let replyMarkup = undefined;
@@ -415,8 +331,11 @@ export async function sendEvents(events, { token, chatId, execFileImpl, careerDi
         }
       }
 
+      const text = formatMessage(event);
+      if (!text) continue;
+
       // eslint-disable-next-line no-await-in-loop -- messages must arrive in log order
-      await sendTelegram(formatMessage(event), { token, chatId, replyMarkup, execFileImpl });
+      await sendTelegram(text, { token, chatId, replyMarkup, fetchImpl });
 
       // Deliver PDF documents ONLY if the event was generated recently (within 10 minutes)
       // so historical log replays or batch imports NEVER spam chat with dozens of old PDFs.
@@ -429,7 +348,7 @@ export async function sendEvents(events, { token, chatId, execFileImpl, careerDi
           if (doc && doc.path) {
             const caption = `📄 Tailored Document: ${doc.entry.company} — ${doc.entry.role}`;
             // eslint-disable-next-line no-await-in-loop
-            await sendTelegramDocument(doc.path, { caption, token, chatId, execFileImpl });
+            await sendTelegramDocument(doc.path, { caption, token, chatId, fetchImpl });
           }
         } catch (err) {
           console.error('telegram notify: failed to send generated document:', err.message);
@@ -478,7 +397,18 @@ export function startTelegramNotifier({
   initOffset(offsetFilePath, auditFilePath)
     .then((initialOffset) => {
       offset = initialOffset;
-      fsSync.watch(auditFilePath, () => poll());
+      // fs.watch throws ENOENT when audit-log.jsonl doesn't exist yet — a
+      // fresh install, since initOffset() creates the OFFSET file, not this
+      // one. The watch is only a latency optimisation; the interval below is
+      // what guarantees delivery. Letting the throw escape took the interval
+      // with it and left the notifier dead until the next restart.
+      try {
+        fsSync.watch(auditFilePath, () => poll());
+      } catch (err) {
+        console.warn(
+          `  telegram notify: live watch unavailable (${err.code}) — polling every ${POLL_INTERVAL_MS / 1000}s instead`
+        );
+      }
       setInterval(poll, POLL_INTERVAL_MS);
       console.log('  telegram notify: on');
     })

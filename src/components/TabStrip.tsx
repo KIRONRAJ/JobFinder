@@ -1,5 +1,6 @@
 import { useRef } from 'react';
 import { useFlipPill } from '../lib/useFlipPill';
+import { AnimatedCounter } from './AnimatedCounter';
 
 /**
  * One tab-strip geometry for the app. Pipeline, Insights and Study each grew
@@ -89,7 +90,11 @@ export function TabStrip<K extends string>({
             ) : (
               <>
                 {label}
-                {count !== undefined && <span className="ml-0.5 tabular-nums opacity-70">{count}</span>}
+                {count !== undefined && (
+                  <span className="ml-0.5 tabular-nums opacity-70">
+                    <AnimatedCounter value={count} />
+                  </span>
+                )}
               </>
             )}
           </button>

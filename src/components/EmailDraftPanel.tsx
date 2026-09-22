@@ -7,7 +7,7 @@ import { copyText } from '../lib/clipboard';
 /**
  * Shows whatever .md drafts Claude has written into this entry's folder, with
  * a copy button. Deliberately the end of the line: the app has no mail
- * credential and no send path — Kironraj copies the text into his own client.
+ * credential and no send path — Jordan copies the text into his own client.
  */
 export function EmailDraftPanel({ entry }: { entry: OutreachEntry }) {
   const [drafts, setDrafts] = useState<OutreachEmailDraft[] | null>(null);

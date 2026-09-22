@@ -85,17 +85,70 @@ function unparseableDates(list) {
   return bad;
 }
 
+// `analysis` is AI-authored and written straight into this file, never through
+// the API — so nothing validates it on the way in, and its TypeScript types are
+// erased by the time the app reads them. A single string where a list belongs
+// takes the whole role page down with "x.map is not a function": learningTasks
+// did it on 4 Sep 2026, gap.theyWant/youHave again on 11 Sep. AnalysisPanel now
+// coerces rather than trusting, so this is no longer fatal — this check is what
+// stops the bad shape being written and quietly sitting there.
+const ANALYSIS_LISTS = {
+  ats: ['matched', 'missing', 'toEvidence', 'unsupported'],
+  gap: ['theyWant', 'youHave', 'learningTasks'],
+};
+const ANALYSIS_STRINGS = { gap: ['positioning'] };
+
+function misshapedAnalysis(list) {
+  const bad = [];
+  for (const e of list) {
+    const analysis = e.analysis;
+    if (!analysis || typeof analysis !== 'object') continue;
+    for (const [section, fields] of Object.entries(ANALYSIS_LISTS)) {
+      const block = analysis[section];
+      if (!block || typeof block !== 'object') continue;
+      for (const field of fields) {
+        if (field in block && !Array.isArray(block[field])) {
+          bad.push(
+            `${e.company} — ${e.role}: analysis.${section}.${field} is ${typeof block[field]}, expected an array`
+          );
+        }
+      }
+    }
+    for (const [section, fields] of Object.entries(ANALYSIS_STRINGS)) {
+      const block = analysis[section];
+      if (!block || typeof block !== 'object') continue;
+      for (const field of fields) {
+        if (field in block && typeof block[field] !== 'string') {
+          bad.push(
+            `${e.company} — ${e.role}: analysis.${section}.${field} is ${typeof block[field]}, expected a string`
+          );
+        }
+      }
+    }
+  }
+  return bad;
+}
+
 const keys = (list, field) => new Set(list.map((e) => e && e[field]).filter(Boolean));
 const lostIds = [...keys(previous, 'id')].filter((k) => !keys(current, 'id').has(k));
 const lostKeys = [...keys(previous, 'matchKey')].filter((k) => !keys(current, 'matchKey').has(k));
 const shrank = current.length < previous.length;
 
 const badDates = unparseableDates(current);
+const badShapes = misshapedAnalysis(current);
 
-if (!lostIds.length && !lostKeys.length && !shrank && !badDates.length) {
+if (!lostIds.length && !lostKeys.length && !shrank && !badDates.length && !badShapes.length) {
   const added = current.length - previous.length;
   console.log(`OK    ${REL}: ${previous.length} -> ${current.length} entries` + (added ? ` (+${added})` : ', none lost'));
   process.exit(0);
+}
+
+if (badShapes.length && !lostIds.length && !lostKeys.length && !shrank) {
+  console.error(`\nFAIL  ${REL} has ${badShapes.length} analysis field(s) with the wrong shape`);
+  for (const b of badShapes) console.error(`        - ${b}`);
+  console.error('\n      These are AI-authored and bypass every type check on the way in.');
+  console.error('      A string where the app expects a list crashes the role page.\n');
+  process.exit(1);
 }
 
 if (badDates.length && !lostIds.length && !lostKeys.length && !shrank) {

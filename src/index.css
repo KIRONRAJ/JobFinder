@@ -139,11 +139,76 @@
     color-scheme: dark;
   }
 
+  /* Cyber Obsidian — third selectable theme (v5.4.0). Deep slate-950 obsidian,
+     neon emerald & electric cyan accents, holographic borders, tech matrix glow. */
+  [data-theme='cyber'] {
+    --canvas: 243 247 246;
+    --panel: 255 255 255;
+    --panel-2: 235 242 240;
+    --ink: 15 23 42;
+    --ink-soft: 51 65 85;
+    --ink-faint: 100 116 139;
+    --line: 203 218 214;
+    --line-soft: 226 235 233;
+
+    --accent: 16 185 129;
+    --accent-2: 6 182 212;
+    --on-accent: 255 255 255;
+
+    --neutral: 100 116 139;
+    --applied: 16 185 129;
+    --amber: 217 119 6;
+    --rose: 225 29 72;
+    --grass: 16 185 129;
+    --primary-yellow: 202 138 4;
+
+    --shadow-hard: 203 218 214;
+    --pulse: 16 185 129;
+
+    color-scheme: light;
+  }
+
+  .dark[data-theme='cyber'] {
+    --canvas: 7 10 17;
+    --panel: 13 18 28;
+    --panel-2: 19 27 41;
+    --ink: 241 245 249;
+    --ink-soft: 148 163 184;
+    --ink-faint: 100 116 139;
+    --line: 30 41 59;
+    --line-soft: 20 28 42;
+
+    --accent: 16 185 129;
+    --accent-2: 6 182 212;
+    --on-accent: 7 10 17;
+
+    --neutral: 148 163 184;
+    --applied: 52 211 153;
+    --amber: 251 191 36;
+    --rose: 251 113 133;
+    --grass: 52 211 153;
+    --primary-yellow: 234 179 8;
+
+    --shadow-hard: 30 41 59;
+    --pulse: 52 211 153;
+
+    color-scheme: dark;
+  }
+
   * {
     @apply border-line;
   }
 
+  /* Prevent unbroken text, links, or hashes from overflowing containers */
+  p, h1, h2, h3, h4, h5, h6, li, dd, dt, blockquote {
+    overflow-wrap: break-word;
+  }
+
   html {
+    overflow-y: scroll;
+    overflow-x: hidden;
+    max-width: 100vw;
+    scrollbar-gutter: stable;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
@@ -151,6 +216,9 @@
   body {
     @apply bg-canvas text-ink font-sans;
     letter-spacing: -0.011em;
+    overflow-x: hidden;
+    max-width: 100vw;
+    width: 100%;
     /* Constructivist grid — the drafting paper the composition sits on. At
        ~3.5% ink it's below the threshold of "pattern" and reads as material,
        but it stops the canvas being a flat void behind the hard shadows,
@@ -170,6 +238,16 @@
     background-image:
       radial-gradient(720px 480px at 12% -8%, rgb(var(--accent) / 0.10), transparent 60%),
       radial-gradient(640px 420px at 100% 0%, rgb(var(--accent-2) / 0.08), transparent 60%);
+    background-attachment: fixed;
+  }
+
+  /* Cyber Obsidian has a high-tech microgrid with deep matrix aura */
+  [data-theme='cyber'] body {
+    background-image:
+      linear-gradient(rgb(var(--accent) / 0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(var(--accent) / 0.04) 1px, transparent 1px),
+      radial-gradient(800px 500px at 50% -10%, rgb(var(--accent-2) / 0.08), transparent 70%);
+    background-size: 32px 32px, 32px 32px, 100% 100%;
     background-attachment: fixed;
   }
 
@@ -204,9 +282,10 @@
   }
 
   .chip {
-    @apply inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-line
+    @apply inline-flex items-center gap-1.5 rounded-full border border-line
            px-2.5 py-[3px] text-label font-medium text-ink-soft
-           transition-transform duration-150 hover:-translate-y-[1px];
+           transition-transform duration-150 hover:-translate-y-[1px]
+           max-w-full text-left break-words whitespace-normal leading-snug;
   }
 
   /* ---- Emoji layer -------------------------------------------------------
@@ -349,6 +428,29 @@
 
   .panel-inset {
     @apply rounded-md border-2 border-line bg-panel-2/50;
+  }
+
+  /* Bento Grid Card (v6.0.0 Flight Deck) with interactive mouse spotlight */
+  .bento-card {
+    @apply relative overflow-hidden rounded-md border-2 border-line bg-panel shadow-hardSm transition-all duration-200;
+  }
+  .bento-card:hover {
+    @apply shadow-hardMd -translate-x-[2px] -translate-y-[2px];
+  }
+  .bento-spotlight {
+    pointer-events: none;
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    background: radial-gradient(
+      450px circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
+      rgb(var(--accent) / 0.08),
+      transparent 80%
+    );
+  }
+  .bento-card:hover .bento-spotlight {
+    opacity: 1;
   }
 
   /* Empty/placeholder states: same geometry, dashed edge to read as "nothing
@@ -556,6 +658,262 @@
     border-color: rgba(255, 255, 255, 0.14);
     box-shadow: 0 18px 45px -12px rgba(109, 60, 255, 0.35), inset 0 1px 0 0 rgba(255, 255, 255, 0.18);
   }
+
+  /* Cyber theme: neon-etched obsidian glass */
+  [data-theme='cyber'] .glass-header {
+    background: rgb(var(--panel) / 0.75);
+    border-color: rgb(var(--accent) / 0.25);
+    box-shadow: 0 10px 30px -10px rgb(0 0 0 / 0.2), inset 0 1px 0 0 rgb(var(--accent) / 0.2);
+  }
+  .dark[data-theme='cyber'] .glass-header {
+    background: rgba(10, 15, 26, 0.75);
+    border-color: rgba(16, 185, 129, 0.2);
+    box-shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.7), inset 0 1px 0 0 rgba(16, 185, 129, 0.25), 0 0 20px -8px rgba(16, 185, 129, 0.15);
+  }
+
+  /* Cyber Theme Component Styles */
+  [data-theme='cyber'] .app-card-surface {
+    border-color: rgb(var(--line));
+    border-radius: 0.75rem;
+    transition: border-color 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .dark[data-theme='cyber'] .app-card-surface {
+    background: rgb(var(--panel));
+    border-color: rgb(var(--line));
+  }
+  [data-theme='cyber'] .app-card-surface:hover {
+    border-color: rgb(var(--accent) / 0.45);
+    box-shadow: 0 0 20px -5px rgb(var(--accent) / 0.22), 0 8px 24px -10px rgb(0 0 0 / 0.3);
+  }
+
+  [data-theme='cyber'] .btn-primary {
+    background: linear-gradient(135deg, rgb(var(--accent)), rgb(var(--accent-2)));
+    color: rgb(var(--on-accent));
+    font-weight: 600;
+    box-shadow: 0 0 16px -4px rgb(var(--accent) / 0.4);
+  }
+  [data-theme='cyber'] .btn-primary:hover {
+    box-shadow: 0 0 24px 0 rgb(var(--accent) / 0.6);
+  }
+
+  [data-theme='cyber'] .nav-active-pill {
+    background: rgb(var(--accent) / 0.15);
+    color: rgb(var(--accent));
+    border: 1px solid rgb(var(--accent) / 0.4);
+    box-shadow: 0 0 12px -3px rgb(var(--accent) / 0.35);
+  }
+
+  /* 3D Tilt Card & Specular Sheen */
+  .tilt-card-container {
+    transform-style: preserve-3d;
+    will-change: transform;
+    position: relative;
+  }
+
+  .specular-sheen {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background: radial-gradient(
+      circle 220px at var(--mouse-x, 50%) var(--mouse-y, 50%),
+      rgba(255, 255, 255, 0.12),
+      transparent 80%
+    );
+    opacity: var(--sheen-opacity, 0);
+    transition: opacity 0.25s ease;
+    z-index: 2;
+  }
+
+  .dark .specular-sheen {
+    background: radial-gradient(
+      circle 240px at var(--mouse-x, 50%) var(--mouse-y, 50%),
+      rgba(255, 255, 255, 0.08),
+      transparent 75%
+    );
+  }
+
+  /* Breathing Status Halos for High-Priority Roles */
+  @keyframes halo-breathe {
+    0%, 100% {
+      box-shadow: 0 0 16px -2px var(--halo-color, rgba(16, 185, 129, 0.35)),
+                  0 0 0 1px var(--halo-border, rgba(16, 185, 129, 0.4));
+    }
+    50% {
+      box-shadow: 0 0 28px 4px var(--halo-color, rgba(16, 185, 129, 0.6)),
+                  0 0 0 1px var(--halo-border, rgba(16, 185, 129, 0.7));
+    }
+  }
+
+  .status-halo-interview {
+    --halo-color: rgba(16, 185, 129, 0.4);
+    --halo-border: rgba(16, 185, 129, 0.5);
+    animation: halo-breathe 3.5s ease-in-out infinite;
+  }
+
+  .status-halo-gold {
+    --halo-color: rgba(234, 179, 8, 0.35);
+    --halo-border: rgba(234, 179, 8, 0.45);
+    animation: halo-breathe 3.5s ease-in-out infinite;
+  }
+
+  /* Radar Ping Wave for Imminent Deadlines */
+  .radar-ping-container {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .radar-ping-ring {
+    position: absolute;
+    inset: -4px;
+    border-radius: 9999px;
+    border: 1.5px solid var(--pulse-color, rgb(var(--rose)));
+    opacity: 0.8;
+    animation: radar-pulse 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+    pointer-events: none;
+  }
+
+  @keyframes radar-pulse {
+    0% {
+      transform: scale(0.85);
+      opacity: 0.9;
+    }
+    75%, 100% {
+      transform: scale(1.8);
+      opacity: 0;
+    }
+  }
+
+  /* Hardware Acceleration & GPU Composition */
+  .glass-header,
+  .app-card-surface,
+  .panel,
+  .nav-active-pill,
+  .tab-active-pill,
+  .tilt-card-container {
+    transform: translateZ(0);
+    backface-visibility: hidden;
+  }
+
+  /* ---- Plnty & Kott inspired Modern Minimal Utilities (v6.1.0) ---- */
+  .hp-squircle {
+    border-radius: 20px;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+  }
+  .dark .hp-squircle {
+    border: 1px solid rgba(255, 255, 255, 0.09);
+  }
+
+  /* Minimal Studio Dashboard Tile */
+  .studio-tile {
+    position: relative;
+    overflow: hidden;
+    border-radius: 24px;
+    background: rgb(var(--panel));
+    border: 1px solid rgba(var(--ink) / 0.07);
+    box-shadow: 0 4px 24px -2px rgba(0, 0, 0, 0.03), 0 1px 2px 0 rgba(0, 0, 0, 0.02);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+                box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+                border-color 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .dark .studio-tile {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 6px 28px -4px rgba(0, 0, 0, 0.35);
+  }
+  .studio-tile:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 16px 36px -6px rgba(0, 0, 0, 0.07);
+    border-color: rgba(var(--ink) / 0.14);
+  }
+  .dark .studio-tile:hover {
+    box-shadow: 0 18px 42px -6px rgba(0, 0, 0, 0.55);
+    border-color: rgba(255, 255, 255, 0.16);
+  }
+
+  /* Spotlight glow on studio tile */
+  .studio-spotlight {
+    pointer-events: none;
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    background: radial-gradient(
+      450px circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
+      rgba(var(--accent) / 0.07),
+      transparent 75%
+    );
+  }
+  .studio-tile:hover .studio-spotlight {
+    opacity: 1;
+  }
+
+  /* Vibrant Candy Pods */
+  .candy-pod {
+    border-radius: 18px;
+    border-width: 1px;
+    transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+                box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+                filter 0.2s ease;
+  }
+  .candy-pod:hover {
+    transform: translateY(-2px) scale(1.015);
+  }
+  .candy-pod:active {
+    transform: translateY(0) scale(0.99);
+  }
+
+  /* Continuous Marquee Ticker Track */
+  .ticker-marquee-track {
+    display: flex;
+    overflow: hidden;
+    user-select: none;
+    mask-image: linear-gradient(to right, transparent 0%, black 5%, black 95%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to right, transparent 0%, black 5%, black 95%, transparent 100%);
+  }
+  .ticker-marquee-run {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 1.5rem;
+    animation: marquee-glide 34s linear infinite;
+  }
+  .ticker-marquee-track:hover .ticker-marquee-run {
+    animation-play-state: paused;
+  }
+  @keyframes marquee-glide {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+  }
+
+  /* Fine noise grain */
+  .grain-overlay {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.03;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+    z-index: 40;
+  }
+}
+
+/* Native View Transitions */
+::view-transition-old(root) {
+  animation: 160ms cubic-bezier(0.4, 0, 1, 1) both vt-fade-out;
+}
+::view-transition-new(root) {
+  animation: 220ms cubic-bezier(0, 0, 0.2, 1) 30ms both vt-fade-in;
+}
+
+@keyframes vt-fade-out {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(0.996); }
+}
+
+@keyframes vt-fade-in {
+  from { opacity: 0; transform: scale(1.004); }
+  to { opacity: 1; transform: scale(1); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -564,5 +922,12 @@
   *::after {
     animation-duration: 0.001ms !important;
     transition-duration: 0.001ms !important;
+  }
+  .tilt-card-container {
+    transform: none !important;
+  }
+  .specular-sheen,
+  .radar-ping-ring {
+    display: none !important;
   }
 }

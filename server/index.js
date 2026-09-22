@@ -2,10 +2,12 @@ import express from 'express';
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { exec, spawn } from 'node:child_process';
 import os from 'node:os';
 import crypto from 'node:crypto';
+import net from 'node:net';
+import dns from 'node:dns';
 import notifier from 'node-notifier';
 import {
   syncPage,
@@ -18,7 +20,31 @@ import {
 import { startTelegramNotifier, findCvDocument } from './notify-telegram.js';
 import { startTelegramCommands } from './telegram-commands.js';
 import { startMorningBriefing } from './telegram-briefing.js';
+import { startEventReminderScheduler } from './telegram-reminders.js';
 import { startCvWorker, fetchJobText } from './cv-worker.js';
+import { readServerLog } from './server-log.js';
+import { generateContent } from './ai-models.js';
+import { assertFetchableUrl } from './safe-url.js';
+import { contentDispositionHeader } from './content-disposition.js';
+
+/**
+ * Force outbound connections onto IPv4.
+ *
+ * This host has an IPv6 address but no working IPv6 route: `curl -6` to
+ * api.telegram.org times out while `curl -4` returns immediately. curl hid
+ * that with Happy Eyeballs — it races both families and takes whichever
+ * answers. Node's fetch (undici) does not fall back the same way here, so the
+ * moment the Telegram transport moved off curl every call died with a generic
+ * "fetch failed" whose real cause was ETIMEDOUT against the AAAA record.
+ *
+ * Google's endpoints were unaffected, which is why Gemini kept working and
+ * only Telegram broke — their v6 path routes, Telegram's does not.
+ *
+ * Both lines are needed: ipv4first alone still left undici hanging. Safe to
+ * delete once this host has working IPv6.
+ */
+net.setDefaultAutoSelectFamily(false);
+dns.setDefaultResultOrder('ipv4first');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -108,18 +134,20 @@ app.use(express.json({ limit: '2mb' }));
  * tailnet only — a request whose Origin is an ordinary home Wi-Fi/LAN
  * address (192.168.x.x etc.) is not covered by this and gets rejected.
  */
+const ORIGIN_ALLOWLIST_RE = new RegExp(
+  `^https?:\\/\\/(localhost|127\\.0\\.0\\.1|100\\.(6[4-9]|[7-9]\\d|1[01]\\d|12[0-7])\\.\\d{1,3}\\.\\d{1,3}|${os
+    .hostname()
+    .toLowerCase()}|[a-z0-9-]+\\.ts\\.net)(:\\d+)?$`,
+  'i'
+);
+
 app.use((req, res, next) => {
   const site = req.get('sec-fetch-site');
   if (site && site !== 'same-origin' && site !== 'none') {
     return res.status(403).json({ error: 'Cross-site requests are not allowed.' });
   }
   const origin = req.get('origin');
-  if (
-    origin &&
-    !/^https?:\/\/(localhost|127\.0\.0\.1|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}|servo|[a-z0-9-]+\.ts\.net)(:\d+)?$/i.test(
-      origin
-    )
-  ) {
+  if (origin && !ORIGIN_ALLOWLIST_RE.test(origin)) {
     return res.status(403).json({ error: 'Origin not allowed.' });
   }
   next();
@@ -254,6 +282,13 @@ function loginRateLimited(ip) {
   return rec.count >= LOGIN_MAX_ATTEMPTS;
 }
 function recordLoginFailure(ip) {
+  // REVIEW(2026-09-15): reads the map twice and relies on && for control flow,
+  // which reads as a
+  // no-op guard but is load-bearing: the record only exists because
+  // loginRateLimited() created it moments earlier on the same request. Called
+  // on any path that skips that call, this silently records nothing and the
+  // limiter never trips. A plain `const rec = ...; if (rec) rec.count++;` says
+  // the same thing without the coupling.
   LOGIN_ATTEMPTS.get(ip)?.count != null && LOGIN_ATTEMPTS.get(ip).count++;
 }
 
@@ -390,6 +425,44 @@ function logActivity(entry, kind, text) {
   entry.activity = [...(entry.activity ?? []), { at: Date.now(), kind, text }];
 }
 
+/**
+ * Everything a status transition must do beyond setting the field: record the
+ * history, log the activity line, move the company folder to match the new
+ * status, and start the follow-up clock on an application.
+ *
+ * Extracted from the PATCH handler so the Telegram bot shares it. That path
+ * used to set `entry.status` and nothing else, which left the folder sitting
+ * under the old status — and the folder layout is what the CV generator and
+ * /api/folder-status both read, so the tracker and the disk silently disagreed.
+ *
+ * Mutates `entry` in place; the caller persists it. Async because
+ * relocateFolder touches the filesystem.
+ */
+async function applyStatusChange(entry, nextStatus, prevStatus, now = Date.now()) {
+  entry.status = nextStatus;
+  entry.statusHistory = [...(entry.statusHistory ?? []), { status: nextStatus, at: now }];
+  logActivity(
+    entry,
+    nextStatus === 'applied' ? 'applied' : 'status',
+    `${STATUS_LABEL[prevStatus] ?? prevStatus} → ${STATUS_LABEL[nextStatus] ?? nextStatus}`
+  );
+  try {
+    await relocateFolder(entry);
+  } catch (err) {
+    console.error('relocateFolder failed:', err.message);
+  }
+
+  // Applying starts the follow-up clock. Only ever set it, never overwrite —
+  // a date the user picked by hand outranks the computed default.
+  if (nextStatus === 'applied' && entry.date && !entry.followUpDue) {
+    entry.followUpDue = businessDaysFrom(entry.date);
+    if (entry.followUpDue) {
+      logActivity(entry, 'note', `Follow-up suggested for ${entry.followUpDue}`);
+    }
+  }
+  return entry;
+}
+
 // Mirrors businessDaysFrom in src/types.ts — duplicated rather than shared
 // because the client bundle and the server have no common module boundary.
 // Public holidays are deliberately ignored; the date is advisory.
@@ -428,6 +501,28 @@ const STATUS_LABEL = {
 // deliberately narrow: only the fields whose value the UI actually branches
 // on by exact string (a typo'd Status renders `undefined` in StatusPill,
 // etc.) — not a full schema validator for every field.
+/**
+ * Fields the client may never set directly, on create or update.
+ *
+ * `analysis`, `evidenceMap`, `priority`, `interview`, `rejection` and `tasks`
+ * are authored by Claude straight to disk; `notionPageId` is the server's own
+ * bookkeeping. Accepting them from a request body lets a stale tab overwrite a
+ * newer AI-authored block with whatever it happened to be holding.
+ *
+ * `folderPath` is deliberately NOT here: it is a user-editable field in the
+ * Add/Edit form (see EditModal.tsx), so stripping it would silently discard
+ * what the user typed. It is bounded by safeCareerPath() at every use instead.
+ */
+const SERVER_OWNED_FIELDS = [
+  'notionPageId',
+  'analysis',
+  'priority',
+  'interview',
+  'rejection',
+  'evidenceMap',
+  'tasks',
+];
+
 const VALID_STATUS = new Set(Object.keys(STATUS_LABEL));
 const VALID_FIT = new Set(['strong', 'good', 'stretch']);
 const VALID_EMPLOYMENT = new Set(['job', 'internship']);
@@ -547,7 +642,7 @@ function safeCareerPath(relative) {
 
 // Statuses whose folder gets moved under a status-named parent (Applied/,
 // Interview/, Declined/, ...). rejected/withdrawn roles move to Declined/
-// rather than being deleted (changed 14 Aug 2026 — Kironraj wants the old
+// rather than being deleted (changed 14 Aug 2026 — Jordan wants the old
 // CV/CL drafts kept around for later analysis, not scrapped) — the app card
 // + Notion row already carry the record, but the drafts themselves stay too.
 const ORGANIZE_STATUS_FOLDER = {
@@ -848,9 +943,13 @@ app.post('/api/applications', async (req, res) => {
     }
     const list = await readData();
     const now = Date.now();
+    // Same strip-list the PATCH route applies — POST used to spread the body
+    // wholesale, so an AI-owned block could be planted at creation time.
+    const clean = { ...req.body };
+    for (const field of SERVER_OWNED_FIELDS) delete clean[field];
     const entry = {
-      ...req.body,
-      id: req.body.id || uid(),
+      ...clean,
+      id: clean.id || uid(),
       created: now,
       updated: now,
     };
@@ -907,25 +1006,7 @@ app.patch('/api/applications/:id', async (req, res) => {
     const rejectionNote =
       typeof body.rejectionNote === 'string' ? body.rejectionNote : undefined;
     delete body.rejectionNote;
-    for (const field of [
-      'activity',
-      'statusHistory',
-      'created',
-      'matchKey',
-      'notionPageId',
-      'analysis',
-      'priority',
-      'interview',
-      'rejection',
-      'evidenceMap',
-      // `tasks` (assessments/take-home work with a due time) is authored by
-      // Claude off the employer's own email, same as the fields above — the
-      // due time and the completion time both come from a mail header, not
-      // from anything the page can know. Stripped for the same reason: an open
-      // tab holding a pre-assessment snapshot must not be able to resurrect a
-      // task that has since been marked done.
-      'tasks',
-    ]) {
+    for (const field of ['activity', 'statusHistory', 'created', 'matchKey', ...SERVER_OWNED_FIELDS]) {
       delete body[field];
     }
 
@@ -937,26 +1018,7 @@ app.patch('/api/applications/:id', async (req, res) => {
     // no-op entry to the timeline.
     const prev = list[idx];
     if (body.status && body.status !== prev.status) {
-      merged.statusHistory = [...(prev.statusHistory ?? []), { status: merged.status, at: now }];
-      logActivity(
-        merged,
-        merged.status === 'applied' ? 'applied' : 'status',
-        `${STATUS_LABEL[prev.status] ?? prev.status} → ${STATUS_LABEL[merged.status] ?? merged.status}`
-      );
-      try {
-        await relocateFolder(merged);
-      } catch (err) {
-        console.error('relocateFolder failed:', err.message);
-      }
-
-      // Applying starts the follow-up clock. Only ever set it, never overwrite —
-      // a date the user picked by hand outranks the computed default.
-      if (merged.status === 'applied' && merged.date && !merged.followUpDue) {
-        merged.followUpDue = businessDaysFrom(merged.date);
-        if (merged.followUpDue) {
-          logActivity(merged, 'note', `Follow-up suggested for ${merged.followUpDue}`);
-        }
-      }
+      await applyStatusChange(merged, body.status, prev.status, now);
     }
     if (body.cvStatus && body.cvStatus !== prev.cvStatus) {
       logActivity(merged, 'cv', `CV status → ${body.cvStatus}`);
@@ -1232,6 +1294,16 @@ app.delete('/api/applications/:id/local', async (req, res) => {
   }
 });
 
+// These four prefixes all read-modify-write applications.json but sit outside
+// the /api/applications prefix, so the lock registered above never covered
+// them — five routes could each interleave with a real applications request
+// and silently clobber it. Registered here rather than wrapping each handler
+// so there is exactly one way this lock is applied in this file.
+app.use('/api/cv-request', serializeRequests('applications'));
+app.use('/api/review-request', serializeRequests('applications'));
+app.use('/api/analysis-request', serializeRequests('applications'));
+app.use('/api/priorities', serializeRequests('applications'));
+
 // ---------- CV requests ----------
 
 /**
@@ -1287,7 +1359,7 @@ app.post('/api/cv-request/:id', async (req, res) => {
       // three mtime comparisons, so having an agent stat the files costs a
       // round trip to learn what the server already knows.
       redundant: await cvLooksCurrent(entry),
-      // Kironraj's own corrections to the fit verdict (24 Aug 2026). Claude
+      // Jordan's own corrections to the fit verdict (24 Aug 2026). Claude
       // must treat these as fact about the candidate and NOT re-derive a
       // contradicting read from the ad — the case that prompted it was a
       // graduate programme whose visa clause was misread as a hard blocker,
@@ -1315,7 +1387,7 @@ app.post('/api/cv-request/:id', async (req, res) => {
 });
 
 // Click-again-to-dequeue: only meaningful before Claude has actually picked
-// the request file up (there's no standing watcher — it sits until Kironraj
+// the request file up (there's no standing watcher — it sits until Jordan
 // says "check pending requests"), so deleting the file is always safe here.
 app.delete('/api/cv-request/:id', async (req, res) => {
   try {
@@ -1348,14 +1420,20 @@ app.delete('/api/cv-request/:id', async (req, res) => {
   }
 });
 
-// ---------- on-demand reviewer critique (v2.6, 21 Aug 2026) ----------
+// ---------- on-demand reviewer critique (v2.6, 21 Aug 2026; live-spawn v2.7, 19 Sep 2026) ----------
 // The reviewer agent used to run automatically on every CV/cover-letter
 // generation, which meant a second full-context agent spawn on every draft
 // whether or not the draft was in doubt. It's a judgement call worth paying
-// for when Kironraj actually has doubts, so it moved behind this button. The
+// for when Jordan actually has doubts, so it moved behind this button. The
 // mechanical half of what it used to catch (page count, A4, PII, visa wording
 // drift, cover-letter length) is now `scripts/verify-docs.py`, which still
 // runs on every generation and costs no tokens at all.
+//
+// Used to write a review_request__*.json file for later batch pickup via
+// "Process pending" — now spawns straight away via startClaudeRun (same
+// engine as /api/claude/run), same as buildReviewPrompt describes, so both
+// the board card and the Role page's live-streamed panel get a result
+// without a separate manual trigger.
 
 app.post('/api/review-request/:id', async (req, res) => {
   try {
@@ -1370,21 +1448,34 @@ app.post('/api/review-request/:id', async (req, res) => {
     if (entry.cvStatus !== 'drafted' && entry.cvStatus !== 'sent') {
       return res.status(409).json({ error: 'No drafted CV/cover letter to review yet' });
     }
-    await ensureDirs();
 
-    const payload = {
-      type: 'review_request',
-      id: entry.id,
-      matchKey: entry.matchKey || matchKeyFor(entry),
-      role: entry.role || '',
-      company: entry.company || '',
-      link: entry.link || '',
-      folderPath: entry.folderPath || '',
-      note: typeof req.body?.note === 'string' ? req.body.note.slice(0, 500) : '',
-      requestedAt: new Date().toISOString(),
-    };
-    const file = path.join(REQUESTS_DIR, `review_request__${payload.matchKey}__${Date.now()}.json`);
-    await fs.writeFile(file, JSON.stringify(payload, null, 2), 'utf8');
+    const matchKey = entry.matchKey || matchKeyFor(entry);
+    const note = typeof req.body?.note === 'string' ? req.body.note.slice(0, 500) : '';
+    const runId = startClaudeRun(
+      buildReviewPrompt({ ...entry, matchKey }, note),
+      `Reviewing the CV & cover letter for ${entry.company} — ${entry.role}…`,
+      'claude',
+      null,
+      // The success path has Claude itself flip reviewStatus to 'reviewed'
+      // (see reviewer.md) before this process exits — if it's still 'queued'
+      // once the run ends for any reason (crash, missing binary, a run that
+      // didn't follow instructions), reset it rather than leaving the button
+      // stuck showing "Reviewing…" forever with no way to retry.
+      () =>
+        withDataLock('applications', async () => {
+          const current = await readData();
+          const i = current.findIndex((a) => a.id === entry.id);
+          if (i === -1 || current[i].reviewStatus !== 'queued') return;
+          current[i] = { ...current[i], reviewStatus: undefined, updated: Date.now() };
+          await writeData(current);
+          appendAudit({
+            action: 'review-request-failed',
+            entryId: entry.id,
+            matchKey,
+            detail: `reviewer run for ${entry.company} — ${entry.role} ended without a verdict; reset for retry`,
+          });
+        }).catch((err) => console.error('Failed to reset stuck reviewStatus:', err.message))
+    );
 
     list[idx] = { ...entry, reviewStatus: 'queued', updated: Date.now() };
     await writeData(list);
@@ -1392,11 +1483,11 @@ app.post('/api/review-request/:id', async (req, res) => {
     appendAudit({
       action: 'review-request',
       entryId: entry.id,
-      matchKey: payload.matchKey,
-      detail: `queued reviewer critique for ${entry.company} — ${entry.role}`,
+      matchKey,
+      detail: `started reviewer critique for ${entry.company} — ${entry.role}`,
     });
 
-    res.json({ ok: true, queued: path.basename(file), entry: list[idx] });
+    res.status(202).json({ ok: true, runId, entry: list[idx] });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
@@ -1404,7 +1495,7 @@ app.post('/api/review-request/:id', async (req, res) => {
 
 // ---------- on-demand deep fit analysis (v2.5, 19 Aug 2026) ----------
 // Same request-file pattern as CV requests, but runs the ATS/gap/score
-// analysis on a still-researching entry so Kironraj can decide apply vs.
+// analysis on a still-researching entry so Jordan can decide apply vs.
 // skip before committing to a CV/cover letter, not only after.
 
 app.post('/api/analysis-request/:id', async (req, res) => {
@@ -1732,7 +1823,7 @@ app.get('/api/outreach/:id/emails', async (req, res) => {
 });
 
 /**
- * Records that Kironraj sent an email himself. This app never sends mail and
+ * Records that Jordan sent an email himself. This app never sends mail and
  * holds no mail credential of any kind — the draft is written to disk, he
  * copies it into his own client, and this route is how the tracker finds out.
  */
@@ -1801,7 +1892,10 @@ app.get('/api/requests/pending', async (_req, res) => {
     for (const file of files) {
       // Must stay in step with buildProcessRequestsPrompt() below — a type
       // counted here but not handled there leaves the badge stuck forever.
-      if (!/^(cv_request|delete_request|outreach_email_request|analysis_request|review_request)__.*\.json$/.test(file)) continue;
+      // review_request is deliberately absent: the Review button spawns
+      // Claude directly now (see /api/review-request/:id) rather than
+      // queuing a file here.
+      if (!/^(cv_request|delete_request|outreach_email_request|analysis_request)__.*\.json$/.test(file)) continue;
       try {
         const raw = await fs.readFile(path.join(REQUESTS_DIR, file), 'utf8');
         const payload = JSON.parse(raw);
@@ -2013,7 +2107,10 @@ app.post('/api/priorities/auto-pick', async (_req, res) => {
 
 app.get('/api/audit-log', async (req, res) => {
   try {
-    const limit = Math.min(Number(req.query.limit) || 200, 1000);
+    // Ceiling raised from 1,000 (Sep 2026): the log passed 1,000 records and
+    // the oldest were being dropped silently, which is the opposite of what a
+    // trail is for. Settings → Audit log asks for the lot.
+    const limit = Math.min(Number(req.query.limit) || 200, 20000);
     let raw = '';
     try {
       raw = await fs.readFile(AUDIT_FILE, 'utf8');
@@ -2039,6 +2136,23 @@ app.get('/api/audit-log', async (req, res) => {
     res.json(events);
   } catch (err) {
     res.status(500).json({ error: String(err) });
+  }
+});
+
+/**
+ * The server's own journald output, for Settings → Server log. Sits behind the
+ * same `app.use('/api', requireAuth)` gate as everything else, which matters
+ * more here than elsewhere: these lines can carry file paths and stack traces.
+ * Read-only, one hardcoded unit, no shell. See server/server-log.js.
+ */
+app.get('/api/server-log', async (req, res) => {
+  try {
+    res.json(await readServerLog(req.query.lines));
+  } catch (err) {
+    // journalctl missing (non-systemd host) or no permission to read the
+    // journal are both normal, recoverable states — say which, don't just 500.
+    const msg = err.code === 'ENOENT' ? 'journalctl not found on this host' : String(err.stderr || err.message || err);
+    res.status(503).json({ error: msg });
   }
 });
 
@@ -2256,7 +2370,7 @@ app.patch('/api/refresher-confidence', async (req, res) => {
 
 /**
  * Mixed ownership, unlike every other store in this file. The seeded questions
- * and their answers are Claude-authored prose; the questions Kironraj adds and
+ * and their answers are Claude-authored prose; the questions Jordan adds and
  * the "practised" flags are his. Both live in one file because splitting them
  * would mean two round trips to render one list, and the merge rule is trivial:
  * whoever wrote a field last owns it. The `source` field records which is which
@@ -2385,7 +2499,7 @@ app.post('/api/interview-bank/:id/generate', async (req, res) => {
       '',
       'Steps:',
       '1. Read "Project Notes/Candidate Key Facts.md" and',
-      '   "Required Documents/Kironraj_Odatt_Peringode_Resume_NZ.txt" first. Every claim in',
+      '   "Required Documents/Jordan_Smith_Resume_NZ.txt" first. Every claim in',
       '   the answer must be traceable to those files. Do not invent an employer, a project,',
       '   a certification, a metric or a story that is not evidenced there.',
       '2. Read App/data/interview-bank.json and match the tone, length and structure of the',
@@ -2395,7 +2509,7 @@ app.post('/api/interview-bank/:id/generate', async (req, res) => {
       '     (what the interviewer is really assessing, which story to pick, what to avoid),',
       '     NOT a summary of the answer.',
       '   - "answer": one long spoken-style paragraph, roughly 180 to 240 words, written in',
-      '     first person as Kironraj would actually say it out loud in the room.',
+      '     first person as Jordan would actually say it out loud in the room.',
       '   - Set "source" to "generated".',
       '4. Honesty rules: never claim ServiceNow certification (training in progress only),',
       '   never call the Udemy AWS course an AWS certification, cite lapsed cPanel and',
@@ -2457,7 +2571,7 @@ app.patch('/api/study/:guide', async (req, res) => {
 
 // ---------- folders ----------
 // Opening the folder in Explorer is now done client-side (see api.ts's
-// openFolder) — this server runs on servo, a different machine from the
+// openFolder) — this server typically runs on a different machine from the
 // browser, so it has no way to launch a program on the client PC.
 
 // Reports whether each entry's company folder actually has CV/cover-letter
@@ -2567,7 +2681,7 @@ app.get('/api/applications/:id/documents/:filename', async (req, res) => {
     }
 
     const isDownload = req.query.download === '1' || req.query.download === 'true';
-    res.setHeader('Content-Disposition', `${isDownload ? 'attachment' : 'inline'}; filename="${safeName}"`);
+    res.setHeader('Content-Disposition', contentDispositionHeader(isDownload ? 'attachment' : 'inline', safeName));
     res.sendFile(filePath);
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -2582,6 +2696,14 @@ app.post('/api/jobs/parse', async (req, res) => {
     const { url, text } = req.body || {};
     if (!url && !text) {
       return res.status(400).json({ error: 'Please provide either a job URL or job description text.' });
+    }
+
+    if (url) {
+      try {
+        assertFetchableUrl(url);
+      } catch (err) {
+        return res.status(400).json({ error: err.message });
+      }
     }
 
     let jobContent = (text || '').trim();
@@ -2604,7 +2726,7 @@ app.post('/api/jobs/parse', async (req, res) => {
       return res.status(503).json({ error: 'GEMINI_API_KEY is not configured on the server.' });
     }
 
-    const prompt = `You are an expert recruitment assistant and job-tracker parser for Kironraj Odatt Peringode (Cyber Security & IT graduate with Master of IT from Whitecliffe College, seeking SOC Analyst, GRC, Network Security, IT Security Support, or Cybersecurity roles in New Zealand).
+    const prompt = `You are an expert recruitment assistant and job-tracker parser for Jordan Smith (Cyber Security & IT graduate with Master of IT from Riverside Institute of Technology, seeking SOC Analyst, GRC, Network Security, IT Security Support, or Cybersecurity roles in New Zealand).
 
 Analyze this job listing and extract structured application fields as JSON:
 - company: string (employer name)
@@ -2623,51 +2745,15 @@ Analyze this job listing and extract structured application fields as JSON:
 JOB LISTING:
 ${jobContent.slice(0, 7000)}`;
 
-    const candidateModels = [
-      'gemini-3.5-flash',
-      'gemini-3.7-flash',
-      'gemini-3.6-flash',
-      'gemini-3.5-flash-lite',
-    ];
-
-    let rawJson = null;
-    let lastErr = null;
-
-    for (const model of candidateModels) {
-      try {
-        const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: prompt }] }],
-              generationConfig: {
-                responseMimeType: 'application/json',
-                temperature: 0.1,
-              },
-            }),
-          }
-        );
-
-        if (!response.ok) {
-          lastErr = new Error(`Gemini ${model} HTTP ${response.status}: ${await response.text()}`);
-          continue;
-        }
-
-        const data = await response.json();
-        const textOut = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (textOut) {
-          rawJson = textOut;
-          break;
-        }
-      } catch (err) {
-        lastErr = err;
-      }
-    }
-
-    if (!rawJson) {
-      return res.status(502).json({ error: lastErr ? lastErr.message : 'Failed to parse job with Gemini' });
+    let rawJson;
+    try {
+      ({ text: rawJson } = await generateContent({
+        parts: [{ text: prompt }],
+        generationConfig: { responseMimeType: 'application/json', temperature: 0.1 },
+        apiKey,
+      }));
+    } catch (err) {
+      return res.status(502).json({ error: err.message });
     }
 
     const parsed = JSON.parse(rawJson);
@@ -2717,6 +2803,33 @@ app.get('/api/events', async (_req, res) => {
     res.json(JSON.parse(await fs.readFile(EVENTS_FILE, 'utf8')));
   } catch {
     res.json({ items: [] });
+  }
+});
+
+app.patch('/api/events/:id', async (req, res) => {
+  try {
+    const raw = await fs.readFile(EVENTS_FILE, 'utf8');
+    const store = JSON.parse(raw);
+    const idx = store.items.findIndex((e) => e.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ error: 'Not found' });
+
+    const body = req.body ?? {};
+    const prev = store.items[idx];
+    const next = { ...prev, ...body };
+    store.items[idx] = next;
+
+    const tmp = `${EVENTS_FILE}.tmp`;
+    await fs.writeFile(tmp, JSON.stringify(store, null, 2), 'utf8');
+    await fs.rename(tmp, EVENTS_FILE);
+
+    appendAudit({
+      action: 'event-completed',
+      matchKey: next.id,
+      detail: `Event updated: ${next.title} (${next.status || 'updated'})`,
+    });
+    res.json(store);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
   }
 });
 
@@ -2784,9 +2897,9 @@ app.delete('/api/assessments/:id', async (req, res) => {
 // linking at a file that may not be there.
 const GENERIC_DOCS_DIR = 'Outreach/Generic CV';
 const GENERIC_DOCS = [
-  { key: 'cvDocx', label: 'CV (Word)', file: 'Kironraj Odatt Peringode - CV.docx' },
-  { key: 'cvPdf', label: 'CV (PDF)', file: 'Kironraj Odatt Peringode - CV.pdf' },
-  { key: 'coverDocx', label: 'Cover letter (Word)', file: 'Kironraj Odatt Peringode - Cover Letter.docx' },
+  { key: 'cvDocx', label: 'CV (Word)', file: 'Jordan Smith - CV.docx' },
+  { key: 'cvPdf', label: 'CV (PDF)', file: 'Jordan Smith - CV.pdf' },
+  { key: 'coverDocx', label: 'Cover letter (Word)', file: 'Jordan Smith - Cover Letter.docx' },
 ];
 
 app.get('/api/generic-docs', async (_req, res) => {
@@ -2955,12 +3068,12 @@ function buildJobhqPrompt(jobUrl) {
  * widens what a request body can make Claude do (the URL-only prompt above
  * was deliberately narrow so there was nothing to inject even in principle),
  * but the terminal panel sits behind the app's login wall specifically so
- * this Claude runner is never reachable by anyone but Kironraj — see the
+ * this Claude runner is never reachable by anyone but Jordan — see the
  * Tailscale/auth security audit. Not reachable pre-login.
  */
 function buildCommandPrompt(text) {
   return [
-    "Kironraj typed or pasted this into the Job Search HQ app's terminal panel",
+    "Jordan typed or pasted this into the Job Search HQ app's terminal panel",
     "(not a full chat session):",
     '',
     '"""',
@@ -2998,7 +3111,7 @@ function buildGmailfetchPrompt(count) {
   return [
     `Use the gmailfetch skill (Career and Job/App project root) to check the last ${count} emails`,
     'across the whole mailbox (not just the inbox) for job-tracker updates, exactly as if',
-    `Kironraj had typed "/gmailfetch ${count}" into a chat session with that skill loaded.`,
+    `Jordan had typed "/gmailfetch ${count}" into a chat session with that skill loaded.`,
     '',
     "Follow the skill's own SKILL.md step by step: fetch, match against",
     '"Career and Job/App/data/applications.json", then classify and log per jobhq\'s existing',
@@ -3014,6 +3127,33 @@ function buildGmailfetchPrompt(count) {
 }
 
 /**
+ * The "Review" button's prompt (Role page and board card both use this route) —
+ * built entirely from the entry's own stored fields, not from the request body,
+ * so there's nothing here for a client to inject. Targets one specific entry
+ * directly instead of writing a review_request__*.json file for later batch
+ * pickup (that file-queue path was retired 19 Sep 2026 — see reviewer.md).
+ */
+function buildReviewPrompt(entry, note) {
+  return [
+    `Use the jobhq skill to run the reviewer-agent critique on this one entry:`,
+    `${entry.company} — ${entry.role} (matchKey: ${entry.matchKey}).`,
+    `Job ad link: ${entry.link || '(none stored)'}`,
+    `Folder: "Career and Job/${entry.folderPath || ''}"`,
+    ...(note ? [`Jordan's note: ${note}`] : []),
+    '',
+    'Read references/reviewer.md from the skill directory and follow it exactly —',
+    "this entry's reviewStatus is already 'queued', so treat being handed this task",
+    'as the request itself; do not look for a review_request file.',
+    '',
+    'Fold any genuine findings back into the drafted CV/cover letter, re-run',
+    '`python App/scripts/verify-docs.py --match-key ' + entry.matchKey + '`, then write',
+    'the `analysis.review` verdict block onto this entry and set reviewStatus to',
+    '"reviewed", exactly as reviewer.md specifies. Audit-log the result. Reply with',
+    'a short, direct summary of the verdict.',
+  ].join('\n');
+}
+
+/**
  * Built with no user input at all — the button that triggers this just says
  * "process what's already queued", so there's nothing here for a request body
  * to inject even in principle.
@@ -3022,8 +3162,7 @@ function buildProcessRequestsPrompt() {
   return [
     'Use the jobhq skill to process every pending request file in',
     '"Career and Job/App/requests/" (cv_request__*.json, delete_request__*.json,',
-    'outreach_email_request__*.json, analysis_request__*.json and',
-    'review_request__*.json).',
+    'outreach_email_request__*.json and analysis_request__*.json).',
     '',
     // The skill is a router as of 21 Aug 2026. Read only what the pending
     // request types actually need - the router lists the full map, but naming
@@ -3032,7 +3171,6 @@ function buildProcessRequestsPrompt() {
     'references/. Read only the files the pending requests actually need:',
     '  cv_request       -> references/cv-generation.md + references/ats-scoring.md',
     '  analysis_request -> references/ats-scoring.md',
-    '  review_request   -> references/reviewer.md',
     '  outreach_email_request -> references/outreach.md',
     '  delete_request   -> references/requests-and-buttons.md',
     'Plus references/notion.md for any of them that writes to Notion, and',
@@ -3055,7 +3193,7 @@ function buildProcessRequestsPrompt() {
     'and whatever notes the row already carries. Save it as a .md file into the',
     "row's folderPath (already set on the request payload, always under",
     '"Outreach/"). Set that entry\'s emailStatus to "drafted" and log the activity.',
-    'NEVER send the email and never use any mail tool — Kironraj copies it out of',
+    'NEVER send the email and never use any mail tool — Jordan copies it out of',
     'the app and sends it himself. Then delete the request file.',
     '',
     'For an analysis_request, run the on-demand deep fit analysis protocol from',
@@ -3064,13 +3202,6 @@ function buildProcessRequestsPrompt() {
     '`analysis` block (and refine `evidenceMap` if not already refined), set',
     'analysisStatus to "ready", state the verdict in your reply, then delete the',
     'request file.',
-    '',
-    'For a review_request, run the reviewer-agent critique from the jobhq skill',
-    'against the already-drafted CV and cover letter in the entry\'s folderPath —',
-    'one agent, both documents together, nothing read from disk by the agent',
-    'itself. Fold genuine findings back in one batched pass, re-run',
-    '`python App/scripts/verify-docs.py --match-key <matchKey>` afterwards, set',
-    'reviewStatus to "reviewed", then delete the request file.',
     '',
     'Log each change to the audit log. Do not touch',
     'any entry that has no matching request file. If a request is malformed or its',
@@ -3097,7 +3228,7 @@ const SILENT_STREAM_EVENT_TYPES = new Set(['system', 'user', 'rate_limit_event']
  * Turns one line of Claude's `--output-format stream-json` output into the
  * {stream, line} shape the client already renders.
  */
-function translateClaudeStreamJsonLine(raw, push) {
+function translateClaudeStreamJsonLine(raw, push, run) {
   let event;
   try {
     event = JSON.parse(raw);
@@ -3105,6 +3236,11 @@ function translateClaudeStreamJsonLine(raw, push) {
     push('out', raw);
     return;
   }
+
+  // Every event carries the CLI's session_id — capture it so a follow-up
+  // reply typed into the terminal can --resume this exact conversation
+  // instead of starting a contextless new one. See startClaudeRun.
+  if (run && event.session_id) run.sessionId = event.session_id;
 
   if (event.type === 'assistant' && Array.isArray(event.message?.content)) {
     for (const block of event.message.content) {
@@ -3149,7 +3285,7 @@ function translateClaudeStreamJsonLine(raw, push) {
 // event was observed yet (that call made no tool calls) — a real jobhq run
 // will exercise that path; until then an unrecognized event still falls
 // through to a raw dump below rather than being silently dropped.
-function translateGeminiStreamJsonLine(raw, push) {
+function translateGeminiStreamJsonLine(raw, push, run) {
   let event;
   try {
     event = JSON.parse(raw);
@@ -3157,6 +3293,10 @@ function translateGeminiStreamJsonLine(raw, push) {
     push('out', raw);
     return;
   }
+
+  // Same session_id capture as the Claude translator — a no-op today if
+  // gemini-cli doesn't emit one, since resume is then simply never offered.
+  if (run && event.session_id) run.sessionId = event.session_id;
 
   if (event.type === 'message') {
     if (event.role === 'assistant' && event.content) push('out', event.content);
@@ -3190,9 +3330,16 @@ function translateGeminiStreamJsonLine(raw, push) {
 const PROVIDERS = {
   claude: {
     bin: CLAUDE_BIN,
-    args: (prompt) => ['-p', prompt, '--dangerously-skip-permissions', '--output-format', 'stream-json', '--verbose'],
+    // A sessionId means this call is a reply to a prior run's clarifying
+    // question, not a fresh command — --resume puts it back in that exact
+    // conversation so "2" or "yes, log it separately" actually means something.
+    args: (prompt, sessionId) =>
+      sessionId
+        ? ['-p', prompt, '--resume', sessionId, '--dangerously-skip-permissions', '--output-format', 'stream-json', '--verbose']
+        : ['-p', prompt, '--dangerously-skip-permissions', '--output-format', 'stream-json', '--verbose'],
     translateLine: translateClaudeStreamJsonLine,
     label: 'Claude',
+    supportsResume: true,
   },
   gemini: {
     bin: process.execPath, // node itself — see resolveGeminiEntry
@@ -3206,6 +3353,10 @@ const PROVIDERS = {
     ],
     translateLine: translateGeminiStreamJsonLine,
     label: 'Gemini',
+    // No confirmed --resume equivalent for gemini-cli — see the empirical
+    // notes on translateGeminiStreamJsonLine. Never attempt it; a captured
+    // session_id (if one ever shows up) is simply ignored for this provider.
+    supportsResume: false,
   },
 };
 
@@ -3229,7 +3380,7 @@ function summarizeToolUse(name, input) {
  * `provider` selects which CLI binary/flags/stream-json dialect to use — see
  * the PROVIDERS registry above.
  */
-function startClaudeRun(promptText, startMessage, provider = 'claude') {
+function startClaudeRun(promptText, startMessage, provider = 'claude', sessionId = null, onExit = null) {
   const providerConfig = PROVIDERS[provider] ?? PROVIDERS.claude;
   const runId = `run_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const run = {
@@ -3240,6 +3391,9 @@ function startClaudeRun(promptText, startMessage, provider = 'claude') {
     listeners: new Set(),
     child: null,
     startedAt: Date.now(),
+    // Pre-seeded when this run is itself a --resume; confirmed/kept in sync
+    // as events stream in either way — see translateClaudeStreamJsonLine.
+    sessionId,
   };
   CLAUDE_RUNS.set(runId, run);
 
@@ -3256,7 +3410,7 @@ function startClaudeRun(promptText, startMessage, provider = 'claude') {
   // stream-json gives one NDJSON event per assistant message/tool call as it
   // happens, instead of plain -p mode's single buffered dump at the very
   // end — that's what makes the log actually look real-time.
-  const child = spawn(providerConfig.bin, providerConfig.args(promptText), {
+  const child = spawn(providerConfig.bin, providerConfig.args(promptText, sessionId), {
     cwd: CAREER_DIR,
     shell: false,
     windowsHide: true,
@@ -3277,11 +3431,11 @@ function startClaudeRun(promptText, startMessage, provider = 'claude') {
     const lines = stdoutBuffer.split('\n');
     stdoutBuffer = lines.pop() ?? '';
     for (const line of lines) {
-      if (line.trim()) providerConfig.translateLine(line, push);
+      if (line.trim()) providerConfig.translateLine(line, push, run);
     }
   });
   child.on('close' /* flush any trailing partial line */, () => {
-    if (stdoutBuffer.trim()) providerConfig.translateLine(stdoutBuffer, push);
+    if (stdoutBuffer.trim()) providerConfig.translateLine(stdoutBuffer, push, run);
   });
   child.stderr.on('data', (b) => push('err', b.toString()));
   child.on('close', (code) => {
@@ -3293,6 +3447,7 @@ function startClaudeRun(promptText, startMessage, provider = 'claude') {
       run.cancelled ? '✗ Stopped' : code === 0 ? '✓ Finished' : `✗ Exited with code ${code}`
     );
     for (const send of run.listeners) send({ stream: 'done', line: String(code) });
+    onExit?.(code);
     // Keep the transcript around briefly so a reconnecting page can read it.
     setTimeout(() => CLAUDE_RUNS.delete(runId), 10 * 60 * 1000);
   });
@@ -3300,6 +3455,7 @@ function startClaudeRun(promptText, startMessage, provider = 'claude') {
     push('err', `Could not start ${providerConfig.label}: ${err.message}`);
     run.done = true;
     for (const send of run.listeners) send({ stream: 'done', line: '1' });
+    onExit?.(1);
   });
 
   return runId;
@@ -3345,10 +3501,21 @@ app.post('/api/claude/command', async (req, res) => {
       return res.status(400).json({ error: "That's too long — trim it down and try again." });
     }
     const provider = req.body?.provider === 'gemini' ? 'gemini' : 'claude';
+
+    // resumeRunId names the panel's previous run, e.g. one that ended by
+    // asking a clarifying question ("log it separately?"). If that run is
+    // still tracked and captured a session id, --resume puts this reply back
+    // in that exact conversation instead of spawning a contextless new one —
+    // otherwise this falls back to the original stateless command prompt.
+    const resumeRunId = String(req.body?.resumeRunId ?? '').trim();
+    const priorSessionId =
+      resumeRunId && PROVIDERS[provider].supportsResume ? (CLAUDE_RUNS.get(resumeRunId)?.sessionId ?? null) : null;
+
     const runId = startClaudeRun(
-      buildCommandPrompt(text),
+      priorSessionId ? text : buildCommandPrompt(text),
       `Running ${PROVIDERS[provider].label} against your request…`,
-      provider
+      provider,
+      priorSessionId
     );
     res.status(202).json({ ok: true, runId });
   } catch (err) {
@@ -3358,7 +3525,7 @@ app.post('/api/claude/command', async (req, res) => {
 
 /**
  * Manual trigger for the "on-demand, not a standing watcher" loop described in
- * the jobhq skill: instead of Kironraj typing "check requests" in chat, this
+ * the jobhq skill: instead of Jordan typing "check requests" in chat, this
  * button does the same thing — spawn Claude with the same instructions it
  * would already follow, against whatever's sitting in App/requests/ right now.
  */
@@ -3623,7 +3790,15 @@ app.post('/api/notion/reconcile', async (_req, res) => {
 // for the rest of the day until someone notices and restarts it by hand.
 // Log and keep running rather than exit — a local single-user tool staying
 // up in a slightly-off state beats going dark outright.
+// Startup failures are the one exception: a server that cannot bind has
+// nothing to serve, and keeping it alive turns a loud failure into a silent
+// one. The loopback listener has its own 'error' handler, so this is only a
+// backstop for a bind error arriving by some other path.
 process.on('uncaughtException', (err) => {
+  if (err?.code === 'EADDRINUSE') {
+    console.error('FATAL: address already in use —', err.message);
+    process.exit(1);
+  }
   console.error('Uncaught exception (server kept running):', err);
 });
 process.on('unhandledRejection', (reason) => {
@@ -3634,10 +3809,25 @@ process.on('unhandledRejection', (reason) => {
 const DIST_DIR = path.join(APP_DIR, 'dist');
 const hasDist = fsSync.existsSync(DIST_DIR);
 if (hasDist) {
-  app.use(express.static(DIST_DIR));
+  app.use(
+    express.static(DIST_DIR, {
+      maxAge: '1y',
+      immutable: true,
+      setHeaders: (res, filePath) => {
+        // Never cache HTML so users always receive fresh chunk references
+        if (filePath.endsWith('.html')) {
+          res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+        } else if (filePath.includes(path.sep + 'assets' + path.sep)) {
+          // Vite hashed bundles are immutable
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        }
+      },
+    })
+  );
   app.get('*', (req, res, next) => {
     // API routes and missing static assets in /assets/ must not fall back to index.html
     if (req.path.startsWith('/api/') || req.path.startsWith('/assets/')) return next();
+    res.setHeader('Cache-Control', 'no-cache, must-revalidate');
     res.sendFile(path.join(DIST_DIR, 'index.html'));
   });
 }
@@ -3660,11 +3850,32 @@ function detectTailscaleIp() {
 
 // Bound to loopback AND the Tailscale interface specifically — never
 // 0.0.0.0. This server can spawn Claude with permissions bypassed, so
-// "reachable from the tailnet Kironraj already controls" is as far as this
+// "reachable only from the tailnet you already control" is as far as this
 // goes; the ordinary home Wi-Fi/LAN is deliberately not covered by either
 // bind, and the origin-check middleware above enforces the same boundary
 // regardless of which interface a request arrives on.
 const TAILSCALE_IP = process.env.TAILSCALE_IP || detectTailscaleIp() || '127.0.0.1';
+
+/**
+ * Only bind ports and start timers when this file is the process entry point.
+ *
+ * Node 22's `node --test <dir>` executes every file in the directory, this one
+ * included. Without this guard that started a second server, which collided
+ * with the live service, got its EADDRINUSE swallowed by the uncaughtException
+ * handler below, and then sat forever on the two intervals at the bottom —
+ * hanging the whole suite even though every test passes individually.
+ *
+ * Compared as a file URL rather than by checking argv[1].endsWith('index.js'):
+ * mcp-server/index.js would match that string test too.
+ */
+const isEntryPoint =
+  process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isEntryPoint) {
+  startServer();
+}
+
+function startServer() {
 app.listen(PORT, '127.0.0.1', () => {
   console.log(`\n  Job Search HQ API  →  http://localhost:${PORT}`);
   console.log(`  web UI: ${hasDist ? `on (serving ${DIST_DIR})` : 'off (no dist folder found)'}`);
@@ -3690,6 +3901,33 @@ app.listen(PORT, '127.0.0.1', () => {
         });
         syncToNotion(updated).catch((err) => console.error('Notion sync failed:', err.message));
         return updated;
+      });
+    },
+    // Status changes get their own handler rather than going through the
+    // generic mutator above: a transition has to run applyStatusChange (history,
+    // folder relocation, follow-up clock), and the mutator contract is
+    // synchronous so it cannot await the folder move.
+    setApplicationStatus: async (idOrKey, nextStatus) => {
+      if (!VALID_STATUS.has(nextStatus)) return { ok: false, invalidStatus: true };
+      return withDataLock('applications', async () => {
+        const list = await readData();
+        const idx = list.findIndex((a) => a.id === idOrKey || a.matchKey === idOrKey);
+        if (idx === -1) return { ok: false, notFound: true };
+        const entry = { ...list[idx] };
+        const prevStatus = entry.status;
+        if (prevStatus === nextStatus) return { ok: true, unchanged: true, entry };
+        await applyStatusChange(entry, nextStatus, prevStatus);
+        entry.updated = Date.now();
+        list[idx] = entry;
+        await writeData(list);
+        await appendAudit({
+          action: 'status',
+          entryId: entry.id,
+          matchKey: entry.matchKey,
+          detail: `${prevStatus} → ${nextStatus} (via Telegram)`,
+        });
+        syncToNotion(entry).catch((err) => console.error('Notion sync failed:', err.message));
+        return { ok: true, entry, prevStatus };
       });
     },
     createApplication: async (entry) => {
@@ -3840,7 +4078,31 @@ app.listen(PORT, '127.0.0.1', () => {
   startTelegramNotifier();
   startTelegramCommands(telegramHandlers);
   startMorningBriefing({ getApplications: readData });
-  startCvWorker();
+  startEventReminderScheduler({
+    getEventsStore: async () => JSON.parse(await fs.readFile(EVENTS_FILE, 'utf8')),
+    getApplications: readData,
+    writeEventsStore: async (store) => {
+      const tmp = `${EVENTS_FILE}.tmp`;
+      await fs.writeFile(tmp, JSON.stringify(store, null, 2), 'utf8');
+      await fs.rename(tmp, EVENTS_FILE);
+    },
+  });
+  // Hand the worker the same lock the API routes use — it writes
+  // applications.json from a background timer, so it races them without it.
+  startCvWorker({ lock: (fn) => withDataLock('applications', fn) });
+}).on('error', (err) => {
+  // The loopback bind is the app. If it can't be had, there is nothing to
+  // serve and staying up only hides that — exit and let systemd restart.
+  // Deliberately NOT merged with the tailnet handler below, which treats the
+  // same error code as a expected, recoverable condition.
+  if (err.code === 'EADDRINUSE') {
+    console.error(
+      `\n  FATAL: port ${PORT} is already in use on 127.0.0.1 — another copy of this server is running.\n`
+    );
+  } else {
+    console.error('\n  FATAL: could not bind loopback:', err);
+  }
+  process.exit(1);
 });
 app
   .listen(PORT, TAILSCALE_IP, () => {
@@ -3859,3 +4121,4 @@ setInterval(checkStaleApplied, 30 * 60 * 1000);
 
 drainNotionQueue().catch((err) => console.error('Notion queue drain failed:', err.message));
 setInterval(() => drainNotionQueue().catch((err) => console.error('Notion queue drain failed:', err.message)), 10 * 60 * 1000);
+}

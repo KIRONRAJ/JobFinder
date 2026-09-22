@@ -1,4 +1,5 @@
 import type { Application, EvidenceMap, EvidenceState } from '../types';
+import { asList } from './asList';
 
 /**
  * Auto-derives an evidence map from an entry's stored `analysis.ats` when no
@@ -15,10 +16,12 @@ export function deriveEvidenceMap(app: Application): EvidenceMap {
   const ats = app.analysis?.ats;
   if (!ats) return out;
 
-  for (const k of ats.matched ?? []) out[k] = { state: 'verified' };
-  for (const k of ats.toEvidence ?? []) out[k] = { state: 'needs-wording' };
-  for (const k of ats.missing ?? []) out[k] = { state: 'learning-gap' };
-  for (const k of ats.unsupported ?? []) out[k] = { state: 'do-not-claim' };
+  // asList, not `?? []` — these are AI-authored and a string here would iterate
+  // its own characters, filling the map with single letters instead of crashing.
+  for (const k of asList(ats.matched)) out[k] = { state: 'verified' };
+  for (const k of asList(ats.toEvidence)) out[k] = { state: 'needs-wording' };
+  for (const k of asList(ats.missing)) out[k] = { state: 'learning-gap' };
+  for (const k of asList(ats.unsupported)) out[k] = { state: 'do-not-claim' };
   return out;
 }
 

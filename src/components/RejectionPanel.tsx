@@ -10,7 +10,7 @@ interface Props {
 }
 
 /**
- * Rendered only for `status: rejected` entries. Captures Kironraj's own
+ * Rendered only for `status: rejected` entries. Captures Jordan's own
  * short reason (`rejection.userNote`) and, once Claude has drafted the rest,
  * renders `likelyReasons` and `improvements`.
  *

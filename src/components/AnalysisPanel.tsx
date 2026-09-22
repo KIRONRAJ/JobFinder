@@ -1,6 +1,7 @@
 import { Icon } from './Icons';
 import { AtsScorePanel } from './AtsScorePanel';
 import type { Analysis, LearningTask } from '../types';
+import { asList } from '../lib/asList';
 
 /** Every group carries an icon and an explicit heading, so the four keyword
  *  buckets never rely on chip colour alone to tell them apart. */
@@ -27,15 +28,15 @@ function KeywordGroup({
           ? 'border-amber/40 text-amber'
           : 'border-line text-ink-soft';
   return (
-    <div>
-      <p className="flex items-center gap-1.5 text-micro font-medium text-ink">
-        <IconEl className="h-3 w-3" />
-        {title}
+    <div className="min-w-0 max-w-full">
+      <p className="flex items-center gap-1.5 text-micro font-medium text-ink flex-wrap">
+        <IconEl className="h-3 w-3 shrink-0" />
+        <span>{title}</span>
         <span className="font-normal text-ink-faint">· {hint}</span>
       </p>
-      <div className="mt-2 flex flex-wrap gap-1.5">
+      <div className="mt-2 flex flex-wrap gap-1.5 min-w-0 max-w-full">
         {words.map((w) => (
-          <span key={w} className={`chip ${chipClass}`}>
+          <span key={w} className={`chip max-w-full text-left whitespace-normal break-words leading-snug ${chipClass}`}>
             {w}
           </span>
         ))}
@@ -62,7 +63,9 @@ function LearningTaskItem({ task }: { task: LearningTask }) {
 }
 
 export function AnalysisPanel({ analysis }: { analysis: Analysis }) {
-  const { ats, gap } = analysis;
+  // An analysis missing `ats`/`gap` entirely is the same failure one level up.
+  const ats = analysis.ats ?? ({} as Analysis['ats']);
+  const gap = analysis.gap ?? ({} as Analysis['gap']);
   const ran = new Date(analysis.at).toLocaleDateString(undefined, {
     day: 'numeric',
     month: 'short',
@@ -78,28 +81,28 @@ export function AnalysisPanel({ analysis }: { analysis: Analysis }) {
         <KeywordGroup
           title="Matched"
           hint="already evidenced on the CV"
-          words={ats.matched}
+          words={asList(ats.matched)}
           tone="good"
           icon={Icon.Check}
         />
         <KeywordGroup
           title="Missing"
           hint="the ad asks, the CV doesn't say"
-          words={ats.missing}
+          words={asList(ats.missing)}
           tone="missing"
           icon={Icon.Close}
         />
         <KeywordGroup
           title="Evidence more strongly"
           hint="true, but stated too weakly to score"
-          words={ats.toEvidence}
+          words={asList(ats.toEvidence)}
           tone="evidence"
           icon={Icon.Arrow}
         />
         <KeywordGroup
           title="Unsupported — fix these"
           hint="CV wording the evidence doesn't back"
-          words={ats.unsupported}
+          words={asList(ats.unsupported)}
           tone="warn"
           icon={Icon.Warning}
         />
@@ -108,22 +111,22 @@ export function AnalysisPanel({ analysis }: { analysis: Analysis }) {
       <div className="border-t border-line-soft pt-4">
         <p className="text-micro uppercase tracking-wide text-ink-faint">Gap analysis</p>
 
-        <div className="mt-3 grid gap-4 sm:grid-cols-2">
-          <div>
+        <div className="mt-3 grid gap-4 sm:grid-cols-2 min-w-0">
+          <div className="min-w-0">
             <p className="text-micro font-medium text-ink">They're asking for</p>
             <ul className="mt-1.5 space-y-1">
-              {gap.theyWant.map((t) => (
-                <li key={t} className="text-meta text-ink-soft">
+              {asList(gap.theyWant).map((t) => (
+                <li key={t} className="text-meta text-ink-soft break-words">
                   · {t}
                 </li>
               ))}
             </ul>
           </div>
-          <div>
+          <div className="min-w-0">
             <p className="text-micro font-medium text-ink">You actually have</p>
             <ul className="mt-1.5 space-y-1">
-              {gap.youHave.map((t) => (
-                <li key={t} className="text-meta text-ink-soft">
+              {asList(gap.youHave).map((t) => (
+                <li key={t} className="text-meta text-ink-soft break-words">
                   · {t}
                 </li>
               ))}
@@ -132,17 +135,17 @@ export function AnalysisPanel({ analysis }: { analysis: Analysis }) {
         </div>
 
         {gap.positioning && (
-          <div className="mt-4 rounded-xl border border-line bg-panel-2 p-4">
+          <div className="mt-4 rounded-xl border border-line bg-panel-2 p-4 min-w-0">
             <p className="text-micro font-medium text-ink">Honest positioning</p>
-            <p className="mt-1.5 text-meta leading-relaxed text-ink-soft">{gap.positioning}</p>
+            <p className="mt-1.5 text-meta leading-relaxed text-ink-soft break-words">{gap.positioning}</p>
           </div>
         )}
 
-        {gap.learningTasks.length > 0 && (
+        {asList(gap.learningTasks).length > 0 && (
           <div className="mt-4">
             <p className="text-micro font-medium text-ink">Worth learning</p>
             <ul className="mt-1.5 space-y-1.5">
-              {gap.learningTasks.map((t, i) =>
+              {asList(gap.learningTasks).map((t, i) =>
                 typeof t === 'string' ? (
                   <li key={i} className="text-meta text-ink-soft">
                     · {t}

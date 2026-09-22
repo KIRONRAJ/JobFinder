@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Icon } from './Icons';
+import { ScrambleText } from './ScrambleText';
 import type { Analysis } from '../types';
 
 type Verdict = NonNullable<Analysis['recommendation']>['verdict'];
@@ -92,7 +93,7 @@ export function FitVerdictBanner({
    *  outside this app's own list is lost. */
   onDeleteLocal: () => void;
   deleteLocalBusy: boolean;
-  /** Kironraj's own corrections to this verdict — see Application.userFacts.
+  /** Jordan's own corrections to this verdict — see Application.userFacts.
    *  The verdict is Claude reading an ad; this is the candidate reading it
    *  back. A wrong "skip" used to be a dead end: the only two actions were
    *  accept it or drop the role, with nowhere to say "I *am* eligible, here's
@@ -126,7 +127,9 @@ export function FitVerdictBanner({
       <div className="flex items-start gap-2.5">
         <VerdictIcon className={`mt-0.5 h-5 w-5 shrink-0 ${meta.text}`} />
         <div className="min-w-0 flex-1">
-          <p className={`text-subhead font-semibold ${meta.text}`}>{meta.label}</p>
+          <p className={`text-subhead font-semibold ${meta.text}`}>
+            <ScrambleText text={meta.label} duration={350} />
+          </p>
           <p className="mt-1.5 text-meta leading-relaxed text-ink-soft">{recommendation.reasoning}</p>
         </div>
       </div>

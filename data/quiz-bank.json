@@ -1,0 +1,26 @@
+[
+  {
+    "id": "quiz_linux_ps",
+    "category": "linux",
+    "question": "Which command lists currently running processes?",
+    "options": ["ps", "cat", "grep", "chmod"],
+    "correctOptionId": 0,
+    "explanation": "\"ps\" reports a snapshot of current process status."
+  },
+  {
+    "id": "quiz_linux_perm",
+    "category": "linux",
+    "question": "In Linux, what numeric permission gives the owner full access, and group/others read and execute access only?",
+    "options": ["755", "644", "777", "700"],
+    "correctOptionId": 0,
+    "explanation": "755 gives rwx (4+2+1=7) to owner, and r-x (4+0+1=5) to group and others."
+  },
+  {
+    "id": "quiz_networking_dns",
+    "category": "networking",
+    "question": "Which DNS record type maps a hostname to an IPv4 address?",
+    "options": ["A", "MX", "CNAME", "TXT"],
+    "correctOptionId": 0,
+    "explanation": "An A record maps a hostname directly to an IPv4 address."
+  }
+]

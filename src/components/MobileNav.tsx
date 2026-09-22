@@ -3,37 +3,19 @@ import { gsap, useGSAP, prefersReducedMotion } from '../lib/gsapSetup';
 import { useFlipPill } from '../lib/useFlipPill';
 import { useGsapPresence } from '../lib/useGsapPresence';
 import { Icon } from './Icons';
-import { Sidebar, VIEW_META, NavEmoji } from './Sidebar';
+import { Sidebar, VIEW_META, NavEmoji, type SidebarProps } from './Sidebar';
 import { useDialog } from '../useDialog';
-import type { SortKey, View } from '../types';
+import type { View } from '../types';
 
 /** The four most-reached views get a thumb-reach slot; everything else
- *  (Outreach, filters, appearance, sign out) lives one tap away behind
- *  "More" — a phone's width doesn't fit all six nav items at a legible size. */
+ *  (Outreach, Settings, filters, sign out) lives one tap away behind
+ *  "More" — a phone's width doesn't fit all seven nav items at a legible size. */
 const PRIMARY: View[] = ['list', 'agenda', 'study', 'insights'];
 
-interface Props {
-  view: View;
-  onSetView: (v: View) => void;
-  sort: SortKey;
-  onSetSort: (s: SortKey) => void;
-  typeF: string;
-  onSetTypeF: (t: string) => void;
-  employmentF: string;
-  onSetEmploymentF: (e: string) => void;
-  tagF?: string;
-  onSetTagF?: (t: string) => void;
-  dark: boolean;
-  onToggleDark: () => void;
-  theme: 'bauhaus' | 'pulse';
-  onToggleTheme: () => void;
-  wallpaper: boolean;
-  onToggleWallpaper: () => void;
-  wallpaperDim: number;
-  onSetWallpaperDim: (v: number) => void;
-  sound: boolean;
-  onToggleSound: () => void;
-}
+/** Spread wholesale into <Sidebar> below, so deriving beats restating: the
+ *  hand-copied duplicate of this list drifted every time Sidebar's props
+ *  changed. */
+type Props = Omit<SidebarProps, 'mode'>;
 
 /**
  * Mobile-only (`md:hidden`) bottom tab bar replacing the desktop rail, which

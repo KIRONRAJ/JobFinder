@@ -17,11 +17,6 @@ interface Props {
   /** Mirrors the internal `running` flag outward so a card can show
    *  "Processing…" instead of a generic "Queued…" while a run is live. */
   onRunningChange?: (running: boolean) => void;
-  /** Bumped by the homescreen "Gmail" button to auto-start a gmailfetch run
-   *  the moment the panel opens — a plain counter rather than a boolean so
-   *  a second press while the panel is already open still fires (a boolean
-   *  flip back to the same value wouldn't re-trigger the effect below). */
-  gmailFetchSignal?: number;
 }
 
 interface Progress {
@@ -36,7 +31,6 @@ const REQUEST_LABEL: Record<PendingRequest['type'], string> = {
   delete_request: 'Delete',
   outreach_email_request: 'Email',
   analysis_request: 'ATS score',
-  review_request: 'Review',
   unknown: 'Request',
 };
 
@@ -61,7 +55,7 @@ function isHttpUrl(text: string): boolean {
  *
  * Also surfaces whatever's sitting in App/requests/ (queued CV/CL drafts and
  * deletes) with a one-click "Process pending" trigger — the manual equivalent
- * of the on-demand loop described in the jobhq skill, for when Kironraj wants
+ * of the on-demand loop described in the jobhq skill, for when Jordan wants
  * it processed now instead of waiting until he's next in chat.
  */
 export function TerminalPanel({
@@ -69,7 +63,6 @@ export function TerminalPanel({
   onClose,
   onFinished,
   onRunningChange,
-  gmailFetchSignal,
 }: Props) {
   const [input, setInput] = useState('');
   const [lines, setLines] = useState<Line[]>([]);
@@ -132,12 +125,16 @@ export function TerminalPanel({
   const beginRun = async (
     runMode: 'analyse' | 'command' | 'pending',
     initialProgress: Progress | null,
-    start: () => Promise<Response>
+    start: () => Promise<Response>,
+    /** True when this run is a reply to the previous one (see send()) — keeps
+     *  the prior output on screen instead of wiping it, so the question being
+     *  answered stays visible. */
+    isReply = false
   ) => {
     if (running) return;
 
     setError(null);
-    setLines([]);
+    if (!isReply) setLines([]);
     setMode(runMode);
     setProgress(initialProgress);
     setRunning(true);
@@ -189,8 +186,10 @@ export function TerminalPanel({
   const send = () => {
     const value = input.trim();
     if (!value) return;
+    setInput('');
     // No discrete step count for either shape of run — indeterminate bar.
     if (isHttpUrl(value)) {
+      // A fresh job link always starts a new topic, never a reply.
       return beginRun('analyse', null, () =>
         fetch('/api/claude/run', {
           method: 'POST',
@@ -199,12 +198,21 @@ export function TerminalPanel({
         })
       );
     }
-    return beginRun('command', null, () =>
-      fetch('/api/claude/command', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: value, provider }),
-      })
+    // Any prior run in this panel — including one that ended by asking a
+    // clarifying question ("log it separately?") — becomes the thread this
+    // reply continues. The server falls back to a fresh, stateless command
+    // if that run's session can't be resumed (e.g. it's aged out).
+    const resumeRunId = runIdRef.current;
+    return beginRun(
+      'command',
+      null,
+      () =>
+        fetch('/api/claude/command', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: value, provider, resumeRunId }),
+        }),
+      Boolean(resumeRunId)
     );
   };
 
@@ -219,29 +227,12 @@ export function TerminalPanel({
       })
     );
 
-  const runGmailFetch = () =>
-    beginRun('command', null, () =>
-      fetch('/api/claude/gmailfetch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ count: 10, provider }),
-      })
-    );
-
-  // The homescreen Gmail button opens this panel and bumps the signal in the
-  // same click — this effect is what actually starts the run once the panel
-  // has mounted. Skipped while a run is already in flight so a second press
-  // (or the panel briefly reopening) can't stack two spawns. `runGmailFetch`
-  // is deliberately left out of the dependency array (it's a plain function,
-  // recreated every render like `send`/`processPending` above) — the signal
-  // comparison against the ref is what actually gates re-firing, not deps.
-  const lastGmailSignal = useRef(gmailFetchSignal);
-  useEffect(() => {
-    if (gmailFetchSignal === undefined || gmailFetchSignal === lastGmailSignal.current) return;
-    lastGmailSignal.current = gmailFetchSignal;
-    if (!running) runGmailFetch();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gmailFetchSignal, running]);
+  // The homescreen Gmail button used to auto-start its run through this panel,
+  // via a counter prop and a ref comparison. It never fired — React batches the
+  // "open the panel" and "bump the counter" setStates into one render, so the
+  // panel always mounted with the ref already equal to the counter. It runs
+  // itself from App.tsx now (see handleGmailFetch), with no terminal at all,
+  // which is what that one-fixed-action button wanted in the first place.
 
   const stop = async () => {
     if (!runIdRef.current) return;
@@ -364,8 +355,8 @@ export function TerminalPanel({
               </div>
               <p className="mt-2.5 text-micro text-ink-faint">
                 A job link gets fetched, assessed and logged. Anything else — a pasted rejection
-                email, a status update, a request — runs through the same jobhq skill, with
-                permissions bypassed, so it won't stop to ask.
+                email, a status update, a request — runs through the same jobhq skill. If it ends
+                by asking you something, just type your answer here and send it.
               </p>
               {error && <p className="mt-2 text-micro text-rose">{error}</p>}
             </div>

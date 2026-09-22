@@ -1,6 +1,31 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import type { Application, FolderStatus, OutreachEntry } from '../types';
+
+const CACHE_KEY_APPS = 'jobhq_swr_apps';
+const CACHE_KEY_OUTREACH = 'jobhq_swr_outreach';
+
+function getInitialCachedApps(): Application[] {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY_APPS);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function getInitialCachedOutreach(): OutreachEntry[] {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY_OUTREACH);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
 
 interface AppDataContextValue {
   apps: Application[];
@@ -41,10 +66,14 @@ function reconcileApps(prev: Application[], next: Application[]): Application[] 
  * pairs directly in App.tsx.
  */
 export function AppDataProvider({ children }: { children: React.ReactNode }) {
-  const [apps, setApps] = useState<Application[]>([]);
+  const cachedApps = useMemo(() => getInitialCachedApps(), []);
+  const cachedOutreach = useMemo(() => getInitialCachedOutreach(), []);
+
+  const [apps, setApps] = useState<Application[]>(cachedApps);
   const [folders, setFolders] = useState<Record<string, FolderStatus>>({});
-  const [outreach, setOutreach] = useState<OutreachEntry[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [outreach, setOutreach] = useState<OutreachEntry[]>(cachedOutreach);
+  // SWR: If local cache is pre-warmed, show data immediately (loading: false) while revalidating
+  const [loading, setLoading] = useState<boolean>(cachedApps.length === 0);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notionOn, setNotionOn] = useState(false);
   const [notionError, setNotionError] = useState<string | null>(null);
@@ -62,9 +91,18 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         // Code chat session shows up here without a manual reload.
         api.outreach.list().catch(() => [] as OutreachEntry[]),
       ]);
-      setApps((prev) => reconcileApps(prev, list));
+      setApps((prev) => {
+        const next = reconcileApps(prev, list);
+        try {
+          localStorage.setItem(CACHE_KEY_APPS, JSON.stringify(next));
+        } catch {}
+        return next;
+      });
       setFolders(folderStatus);
       setOutreach(outreachList);
+      try {
+        localStorage.setItem(CACHE_KEY_OUTREACH, JSON.stringify(outreachList));
+      } catch {}
       setLoadError(null);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : String(err));

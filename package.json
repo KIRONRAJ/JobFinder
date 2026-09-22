@@ -1,7 +1,7 @@
 {
   "name": "jobfinder",
   "private": true,
-  "version": "5.2.0",
+  "version": "5.3.0",
   "type": "module",
   "scripts": {
     "dev": "concurrently -n server,web -c cyan,magenta \"npm:dev:server\" \"npm:dev:web\"",
@@ -11,7 +11,9 @@
     "preview": "vite preview",
     "seed": "node scripts/seed-sample-data.mjs",
     "check:data": "node scripts/check-data.mjs",
-    "check:type": "node scripts/check-type-scale.mjs"
+    "check:type": "node scripts/check-type-scale.mjs",
+    "test": "node --import ./server/test-netguard.mjs --test \"server/**/*.test.mjs\" \"mcp-server/**/*.test.mjs\"",
+    "test:integration": "node mcp-server/integration-check.mjs"
   },
   "dependencies": {
     "@fontsource-variable/outfit": "^5.3.0",

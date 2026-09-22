@@ -49,7 +49,7 @@ interface Row {
  * Top-of-page panel showing up to three ranked priorities. Priorities can be
  * set two ways: Claude drafts them from chat with judgement (setBy: 'claude'),
  * or the app auto-picks them from deterministic rules over deadlines +
- * readiness (setBy: 'app') when Kironraj hits "Auto-pick" below.
+ * readiness (setBy: 'app') when Jordan hits "Auto-pick" below.
  *
  * A third case — nothing set at all — used to render an empty prompt box in
  * the single most valuable spot on the homepage. It hardly ever fired: only

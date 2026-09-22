@@ -1,7 +1,9 @@
 node_modules/
 dist/
-data/
-requests/
+/data/*
+!/data/interview-bank.json
+!/data/quiz-bank.json
+/requests/
 .env
 .env.local
 *.log

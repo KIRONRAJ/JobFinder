@@ -85,7 +85,7 @@ visually verified — the browser window wouldn't reflow to a phone width.
 adapted from a supplied Bauhaus design-system prompt (source: a public
 "Design Style: Bauhaus" spec — geometric primitives, primary-colour
 blocking, hard offset shadows, Outfit typeface). Scope was explicitly
-phased, confirmed with Kironraj before building:
+phased, confirmed with Jordan before building:
 
 - **Foundation (app-wide):** every colour token, the sans font (Outfit,
   replacing Inter), `.section-label`, and the three button classes
@@ -107,7 +107,7 @@ phased, confirmed with Kironraj before building:
   used the shared classes, and should be moved onto them rather than
   hand-restyled.
 
-Four scope decisions Kironraj made before this was built, load-bearing for
+Four scope decisions Jordan made before this was built, load-bearing for
 anything that extends it:
 1. **Dark mode kept**, not dropped — the spec is light-only; a dark variant
    was designed to match (off-black canvas, light-grey borders instead of
@@ -350,9 +350,19 @@ animation on the value made exactly the changed numbers render mid-fade.
   (`src/components/MobileNav.tsx`) instead — a fixed, safe-area-aware bottom
   tab bar for the four most-used views (Roles/Agenda/Study/Insights), plus a
   "More" bottom sheet that renders the same `<Sidebar mode="sheet">` for
-  Outreach nav, filters, appearance, and sign-out. One nav content source,
-  two shells — don't hand-roll a second mobile menu when a view or a filter
-  is added; extend `VIEW_META`/`Sidebar` and both surfaces pick it up.
+  Outreach nav, Settings, filters, dark mode, and sign-out. One nav content
+  source, two shells — don't hand-roll a second mobile menu when a view or a
+  filter is added; extend `VIEW_META`/`Sidebar` and both surfaces pick it up.
+  `MobileNav`'s props are `Omit<SidebarProps, 'mode'>`, not a hand-copied list.
+- **Settings (added 11 Sep 2026):** `src/routes/Settings.tsx`, three tabs —
+  Appearance, Audit log, Server log. Theme, background photo and sound moved
+  off the sidebar rail into labelled rows here; dark mode stayed on the rail
+  too, as a one-click control used many times a day. Both log views are
+  *tracing* surfaces, which is why they live here and not under Insights: the
+  audit log (`data/audit-log.jsonl`) is the permanent record of what changed,
+  the server log (journald, `/api/server-log`) is a live rotating window onto
+  whether the process was healthy. Any new app-level preference belongs as a
+  `Row` in the Appearance tab, not as another button on the rail.
 - **Dashboard KPI row (added 22 Aug 2026):** `AnalyticsView` opens with a
   `KpiRow` — four `KpiTile`s (this week vs last, avg response, response
   spread, gone-quiet) in a 2-up/4-up grid, above "What's working". Any new

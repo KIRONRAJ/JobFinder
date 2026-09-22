@@ -45,14 +45,14 @@ export function useFlipList<T>(
       isFirstRun.current = false;
     } else if (container && flipStateRef.current && !reduce) {
       Flip.from(flipStateRef.current, {
-        duration: 0.4,
-        ease: 'power2.inOut',
+        duration: 0.28,
+        ease: 'power2.out',
         absolute: true,
         onEnter: (els) =>
           gsap.fromTo(
             els,
-            { opacity: 0, y: 10, scale: 0.96 },
-            { opacity: 1, y: 0, scale: 1, duration: 0.35, ease: 'power2.out', stagger: 0.03 }
+            { opacity: 0, y: 8, scale: 0.98 },
+            { opacity: 1, y: 0, scale: 1, duration: 0.24, ease: 'power2.out', stagger: 0.02 }
           ),
       });
     }

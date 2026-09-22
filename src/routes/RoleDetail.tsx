@@ -30,9 +30,12 @@ import { EditModal } from '../components/EditModal';
 import { ConfirmDelete } from '../components/ConfirmDelete';
 import { DocumentPreviewModal } from '../components/DocumentPreviewModal';
 import { TerminalPanel } from '../components/TerminalPanel';
+import { CorrespondenceTimeline } from '../components/CorrespondenceTimeline';
+import { LogMessageModal } from '../components/LogMessageModal';
 import { api } from '../api';
 import { useAppData } from '../state/AppDataProvider';
 import { computeReadiness, isCvActuallyQueued, isCvActuallyDone } from '../lib/readiness';
+import { useClaudeRun } from '../lib/useClaudeRun';
 import { resolveEvidenceMap } from '../lib/evidenceState';
 import type { Application } from '../types';
 
@@ -56,11 +59,11 @@ export function RoleDetail() {
   // Pipeline filter (status/search/etc.) lives in the list page's URL query
   // string, not app state — so "back to Pipeline" has to be an actual
   // history pop, not a hardcoded link to "/", or it silently drops whatever
-  // tab/filter Kironraj was on. location.key === 'default' means this page
+  // tab/filter Jordan was on. location.key === 'default' means this page
   // was loaded directly (no prior entry in this session) — home is the only
   // sane target then.
   const backToPipeline = () => (location.key === 'default' ? navigate('/') : navigate(-1));
-  const { apps, setApps, folders, refreshFolders, loading } = useAppData();
+  const { apps, setApps, folders, refreshFolders, refresh, loading } = useAppData();
   const [editOpen, setEditOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -71,6 +74,20 @@ export function RoleDetail() {
   const [deleteLocalBusy, setDeleteLocalBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [terminalOpen, setTerminalOpen] = useState(false);
+  const [logModalOpen, setLogModalOpen] = useState(false);
+  // Fetch apps + folders again the moment the reviewer's live run ends, so the
+  // persisted analysis.review verdict and reviewStatus show up immediately
+  // rather than waiting for the next 12s poll.
+  const reviewRun = useClaudeRun(() => {
+    refresh();
+    refreshFolders();
+  });
+
+  const handleSaveTrackingNotes = async (updatedNotes: string) => {
+    if (!app) return;
+    const updated = await api.update(app.id, { trackingNotes: updatedNotes });
+    setApps((prev) => prev.map((a) => (a.id === app.id ? updated : a)));
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -208,6 +225,17 @@ export function RoleDetail() {
     }
   };
 
+  const handleRequestReview = async () => {
+    setActionError(null);
+    try {
+      const res = await api.requestReview(app.id);
+      setApps((list) => list.map((a) => (a.id === app.id ? res.entry : a)));
+      reviewRun.start(res.runId);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   // Two clicks, not a native confirm() — same in-page-confirm convention as
   // the Delete flow, just lightweight since skipping is reversible (Edit ->
   // change status back) unlike a real delete.
@@ -247,13 +275,13 @@ export function RoleDetail() {
   };
 
   return (
-    <div className="mx-auto max-w-[1400px] px-6 pb-24 pt-0 sm:px-10">
+    <div className="mx-auto max-w-[1400px] px-4 pb-24 pt-0 sm:px-10 min-w-0 max-w-full overflow-x-hidden">
       {/* Sticky Global Glassmorphic Brand Header */}
-      <header className="sticky top-3 z-40 mb-6 flex items-center justify-between gap-3 glass-header rounded-2xl sm:rounded-full px-4 sm:px-6 py-2.5 shadow-xl transition-all duration-300">
+      <header className="sticky top-3 z-40 mb-6 flex items-center justify-between gap-2 sm:gap-3 glass-header rounded-2xl sm:rounded-full px-3.5 sm:px-6 py-2.5 shadow-xl transition-all duration-300 min-w-0 max-w-full">
         <div className="flex items-center gap-2.5 min-w-0">
           <Link
             to="/"
-            className="group/brand flex items-center gap-2 focus:outline-none"
+            className="group/brand flex shrink-0 items-center gap-2 focus:outline-none"
             title="Job Search HQ — Return to Pipeline Home"
             aria-label="Job Search HQ — Return to Pipeline Home"
           >
@@ -265,7 +293,7 @@ export function RoleDetail() {
                 style={{ clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)' }}
               />
             </div>
-            <span className="text-sm sm:text-base font-black uppercase tracking-tight text-ink group-hover/brand:text-accent transition-colors">
+            <span className="whitespace-nowrap text-sm sm:text-base font-black uppercase tracking-tight text-ink group-hover/brand:text-accent transition-colors">
               Job Search HQ
             </span>
             <span className="rounded-full border border-accent/25 bg-accent/10 px-1.5 py-0.2 text-[9px] font-bold uppercase tracking-wider text-accent font-mono">
@@ -273,9 +301,9 @@ export function RoleDetail() {
             </span>
           </Link>
 
-          <span className="text-ink-faint hidden sm:inline text-xs">/</span>
+          <span className="text-ink-faint hidden md:inline text-xs">/</span>
 
-          <span className="truncate text-xs sm:text-meta font-medium text-ink-soft max-w-[160px] sm:max-w-[340px]">
+          <span className="truncate text-xs sm:text-meta font-medium text-ink-soft hidden md:inline max-w-[220px] lg:max-w-[340px]">
             {app.company} · {app.role}
           </span>
         </div>
@@ -475,15 +503,12 @@ export function RoleDetail() {
                 </div>
               )}
               <ResponseTimeline app={app} />
-              {app.trackingNotes && (
-                <div className="panel-inset px-4 py-3.5">
-                  <div className="mb-1.5 flex items-center gap-1.5 text-micro font-medium text-ink-soft">
-                    <Icon.Note className="h-3.5 w-3.5" />
-                    Tracking notes
-                  </div>
-                  <p className="whitespace-pre-wrap text-meta leading-relaxed">{app.trackingNotes}</p>
-                </div>
-              )}
+              <div className="panel-inset px-5 py-4">
+                <CorrespondenceTimeline
+                  app={app}
+                  onLogMessage={() => setLogModalOpen(true)}
+                />
+              </div>
             </div>
           </section>
 
@@ -512,6 +537,92 @@ export function RoleDetail() {
                 <div className="panel-inset px-4 py-4">
                   <AnalysisPanel analysis={app.analysis} />
                 </div>
+                {isCvActuallyDone(app, folder) && (
+                  <div className="panel-inset space-y-3 px-4 py-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-meta font-medium text-ink">Reviewer critique</p>
+                        <p className="mt-0.5 text-micro text-ink-faint">
+                          Independent second opinion on the generated CV & cover letter — rechecks
+                          the ATS score and fact-checks claims against your real experience.
+                        </p>
+                      </div>
+                      <button
+                        onClick={handleRequestReview}
+                        disabled={reviewRun.running || app.reviewStatus === 'queued'}
+                        className="btn-ghost shrink-0 text-micro disabled:opacity-50"
+                      >
+                        {reviewRun.running || app.reviewStatus === 'queued' ? (
+                          <Icon.Clock className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Icon.Search className="h-3.5 w-3.5" />
+                        )}
+                        {reviewRun.running || app.reviewStatus === 'queued'
+                          ? 'Reviewing…'
+                          : app.analysis.review
+                            ? 'Review again'
+                            : 'Review'}
+                      </button>
+                    </div>
+
+                    {(reviewRun.running || reviewRun.lines.length > 0) && (
+                      <div className="max-h-56 overflow-y-auto rounded-lg bg-canvas px-3 py-2.5 font-mono text-micro leading-relaxed">
+                        {reviewRun.lines.map((l, i) => (
+                          <div
+                            key={i}
+                            className={`whitespace-pre-wrap break-words ${
+                              l.stream === 'err'
+                                ? 'text-rose'
+                                : l.stream === 'meta'
+                                  ? 'text-ink-faint'
+                                  : 'text-ink'
+                            }`}
+                          >
+                            {l.line}
+                          </div>
+                        ))}
+                        {reviewRun.running && (
+                          <span className="inline-block h-3.5 w-1.5 animate-pulse bg-accent align-middle" />
+                        )}
+                      </div>
+                    )}
+                    {reviewRun.error && <p className="text-micro text-rose">{reviewRun.error}</p>}
+
+                    {!reviewRun.running && app.analysis.review && (
+                      <div className="rounded-lg border border-line-soft bg-panel-2/40 px-3 py-2.5">
+                        <p className="text-micro font-medium text-ink">
+                          Last reviewed{' '}
+                          {new Date(app.analysis.review.at).toLocaleDateString(undefined, {
+                            day: 'numeric',
+                            month: 'short',
+                            year: 'numeric',
+                          })}{' '}
+                          ·{' '}
+                          <span
+                            className={
+                              app.analysis.review.verdict === 'clean' ? 'text-grass' : 'text-amber'
+                            }
+                          >
+                            {app.analysis.review.verdict === 'clean' ? 'Clean' : 'Issues found'}
+                          </span>
+                          {!app.analysis.review.atsScoreConfirmed && (
+                            <span className="text-rose"> · ATS score mismatch</span>
+                          )}
+                        </p>
+                        <p className="mt-1 text-micro text-ink-soft">{app.analysis.review.summary}</p>
+                        {app.analysis.review.issues.length > 0 && (
+                          <ul className="mt-1.5 space-y-1">
+                            {app.analysis.review.issues.map((issue, i) => (
+                              <li key={i} className="text-micro text-ink-faint">
+                                · {issue}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </section>
           )}
@@ -528,7 +639,7 @@ export function RoleDetail() {
                 {!app.evidenceMap && (
                   <p className="mt-4 border-t border-line-soft pt-3 text-micro text-ink-faint">
                     Auto-derived from ATS analysis. Ask Claude in chat to refine — attach sources,
-                    mark keywords Kironraj can actually back up.
+                    mark keywords Jordan can actually back up.
                   </p>
                 )}
               </div>
@@ -570,7 +681,7 @@ export function RoleDetail() {
         </div>
 
         {/* Right rail — facts displaced off the list row, plus in-page nav. */}
-        <aside className="space-y-6 md:sticky md:top-6 md:self-start">
+        <aside className="space-y-6 md:sticky md:top-24 md:self-start min-w-0">
           {sections.length > 1 && (
             <nav aria-label="Sections" className="hidden md:block">
               <ul className="space-y-0.5">
@@ -676,15 +787,21 @@ export function RoleDetail() {
         onClose={() => setTerminalOpen(false)}
         onFinished={refreshFolders}
       />
+      <LogMessageModal
+        open={logModalOpen}
+        onClose={() => setLogModalOpen(false)}
+        app={app}
+        onSaveNotes={handleSaveTrackingNotes}
+      />
     </div>
   );
 }
 
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex gap-3">
+    <div className="flex gap-3 items-baseline">
       <dt className="w-24 shrink-0 text-ink-soft">{label}</dt>
-      <dd className="min-w-0 flex-1">{children}</dd>
+      <dd className="min-w-0 flex-1 break-words">{children}</dd>
     </div>
   );
 }

@@ -66,7 +66,7 @@ export class ErrorBoundary extends Component<Props, State> {
         </p>
         <p className="mt-4 text-micro text-ink-faint">
           {isChunkError
-            ? 'Your application state and saved data are completely safe on Servo.'
+            ? 'Your application state and saved data are completely safe on the server.'
             : 'The data behind this page is probably fine — this is almost always a display bug, not lost data. Tell Claude what page this was and it can find and fix the actual cause.'}
         </p>
         <div className="mt-5 flex items-center justify-center gap-3">

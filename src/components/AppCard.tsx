@@ -6,6 +6,7 @@ import { FIT_TEXT, StatusPill, statusWash, STATUS_DOT, TagBadge } from './Badges
 import { ReadinessBar } from './ReadinessBar';
 import { computeReadiness, isCvActuallyQueued, isCvActuallyDone } from '../lib/readiness';
 import { rowSignals } from '../lib/rowSignals';
+import { useCardTilt } from '../lib/useCardTilt';
 import type { Application, FolderStatus } from '../types';
 
 interface Props {
@@ -73,17 +74,28 @@ function AppCardImpl({
   const shown = signals.slice(0, 3);
   const overflow = signals.length - shown.length;
 
+  const tiltRef = useCardTilt<HTMLDivElement>({ maxRotation: 4 });
+  const haloClass = app.status === 'interview'
+    ? 'status-halo-interview'
+    : (app.fit === 'strong' || (app as any).fitCategory === 'Gold Fit')
+      ? 'status-halo-gold'
+      : '';
+
   return (
     <div
+      ref={tiltRef}
       // The card lifts diagonally *away* from its shadow and the shadow
       // deepens (hardSm -> hardMd), which is the same physical model the
       // buttons use. It previously only moved up, leaving the shadow the same
       // size — the card slid over its own shadow instead of rising off it.
-      className={`app-card-surface group relative overflow-hidden rounded-md border-2 border-line bg-panel
+      className={`app-card-surface tilt-card-container group relative overflow-hidden rounded-md border-2 border-line bg-panel
                   shadow-hardSm transition duration-150
                   hover:-translate-x-1 hover:-translate-y-1 hover:shadow-hardMd
-                  ${statusWash(app.status)}`}
+                  ${statusWash(app.status)} ${haloClass}`}
     >
+      {/* 3D Cursor-Following Specular Sheen */}
+      <span className="specular-sheen" aria-hidden="true" />
+
       {/* A single raking highlight on hover — the thing that makes the card
           read as a physical panel catching light rather than a div changing
           colour. Transform-only, one pass, no loop. */}
@@ -107,7 +119,13 @@ function AppCardImpl({
           here is a mouse convenience only — the real, keyboard-reachable
           navigation is the <Link> on the role title below. */}
       <div
-        onClick={() => navigate(`/role/${app.id}`)}
+        onClick={() => {
+          if (typeof document !== 'undefined' && 'startViewTransition' in document) {
+            (document as any).startViewTransition(() => navigate(`/role/${app.id}`));
+          } else {
+            navigate(`/role/${app.id}`);
+          }
+        }}
         className="cursor-pointer px-4 py-5 pl-6 transition active:bg-panel-2/60 [@media(hover:hover)]:active:bg-transparent"
       >
         <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2">
@@ -390,21 +408,21 @@ export function ContactPanel({ app, onEdit }: { app: Application; onEdit: () => 
       </div>
 
       {has ? (
-        <dl className="space-y-2 text-meta">
+        <dl className="space-y-2 text-meta min-w-0">
           {app.contactName && (
             <div className="flex gap-3">
               <dt className="w-24 shrink-0 text-ink-soft">Contact</dt>
-              <dd className="min-w-0 flex-1">{app.contactName}</dd>
+              <dd className="min-w-0 flex-1 break-words">{app.contactName}</dd>
             </div>
           )}
           {app.contactEmail && (
             <div className="flex gap-3">
               <dt className="w-24 shrink-0 text-ink-soft">Email</dt>
-              <dd className="min-w-0 flex-1">
+              <dd className="min-w-0 flex-1 break-all">
                 <a
                   href={`mailto:${app.contactEmail}`}
                   onClick={(e) => e.stopPropagation()}
-                  className="text-accent hover:underline"
+                  className="text-accent hover:underline break-all"
                 >
                   {app.contactEmail}
                 </a>
@@ -414,7 +432,7 @@ export function ContactPanel({ app, onEdit }: { app: Application; onEdit: () => 
           {app.nextAction && (
             <div className="flex gap-3">
               <dt className="w-24 shrink-0 text-ink-soft">Next</dt>
-              <dd className="min-w-0 flex-1">
+              <dd className="min-w-0 flex-1 break-words">
                 {app.nextAction}
                 {app.nextActionDue && (
                   <span className="text-ink-soft"> · due {app.nextActionDue}</span>

@@ -34,7 +34,7 @@ function estimateReadiness(entry: Application): number {
  * `pickPriorities()`, ported here so the homepage's "needs attention" strip
  * never has to be empty. This is a **display-only** computation: unlike the
  * server function, it never writes `priority` back onto an entry. Hitting
- * "Auto-pick" in the UI still calls the real endpoint if Kironraj wants these
+ * "Auto-pick" in the UI still calls the real endpoint if Jordan wants these
  * persisted (visible elsewhere, e.g. the Agenda) — this just means the
  * homepage doesn't need that click to stop being an empty prompt box.
  */

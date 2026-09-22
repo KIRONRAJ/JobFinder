@@ -217,6 +217,22 @@ export interface Analysis {
    * submission. This renders as a blocking banner on the role page instead.
    */
   submissionRequirements?: { label: string; done: boolean; note?: string }[];
+  /**
+   * Written by the on-demand reviewer critique (v2.7, 19 Sep 2026) — an
+   * independent second-opinion pass over the already-drafted CV/cover letter,
+   * triggered by the "Review" button. Persisted so the verdict is still
+   * visible on a later visit, not just in the live run's streamed output.
+   */
+  review?: {
+    at: number;
+    verdict: 'clean' | 'issues-found';
+    /** Whether the reviewer's independent read agrees with `score.overall` —
+     *  false flags a mismatch worth a second look, not an automatic rescore. */
+    atsScoreConfirmed: boolean;
+    /** Short, one-line-each findings — empty when verdict is 'clean'. */
+    issues: string[];
+    summary: string;
+  };
 }
 
 export interface Application {
@@ -244,11 +260,11 @@ export interface Application {
   date?: string;
   folderPath?: string;
   notes?: string;
-  /** Corrections Kironraj gives the fit analysis in his own words — an
+  /** Corrections Jordan gives the fit analysis in his own words — an
    *  eligibility clause Claude misread, a skill or a piece of experience the
    *  CV doesn't spell out. Distinct from `notes` above, which is a scratch
    *  field: these are *authoritative*. They ride along with every cv_request
-   *  and analysis_request, and Claude must treat them as fact about Kironraj
+   *  and analysis_request, and Claude must treat them as fact about Jordan
    *  rather than re-deriving a contradicting verdict from the ad alone. */
   userFacts?: string;
   created?: number;
@@ -260,7 +276,7 @@ export interface Application {
   deadline?: string;
   deadlineNotifiedAt?: number;
 
-  /** Things Kironraj has to do by a point in time — assessments, take-home
+  /** Things Jordan has to do by a point in time — assessments, take-home
    *  tasks. Distinct from `deadline` above; see ApplicationTask. */
   tasks?: ApplicationTask[];
 
@@ -358,7 +374,7 @@ export type OutreachEmailStatus = '' | 'queued' | 'drafted' | 'sent';
 
 export interface OutreachEmail {
   kind: OutreachEmailKind;
-  /** YYYY-MM-DD — the day *Kironraj* sent it. Nothing in this app sends mail. */
+  /** YYYY-MM-DD — the day *Jordan* sent it. Nothing in this app sends mail. */
   sentOn: string;
   /** Relative to "Career and Job", e.g. Outreach/Recruiters/Absolute IT/Intro Email - Absolute IT.md */
   draftPath?: string;
@@ -450,7 +466,7 @@ export type OutreachView = 'companies' | 'recruiters';
 // 'list' instead (drag-to-status stays, it just isn't a separate destination
 // any more). 'analytics' / 'fit' / 'evidence' / 'market' / 'audit' collapsed
 // into 'insights', a single tabbed page — see routes/Insights.tsx.
-export type View = 'list' | 'agenda' | 'study' | 'insights' | OutreachView;
+export type View = 'list' | 'agenda' | 'study' | 'insights' | 'settings' | OutreachView;
 
 export function isOutreachView(v: View): v is OutreachView {
   return v === 'companies' || v === 'recruiters';
@@ -500,6 +516,14 @@ export interface AuditEvent {
   entryId?: string;
   matchKey?: string;
   detail?: string;
+}
+
+/** One journald record from the server's own unit, via /api/server-log.
+ *  Unlike AuditEvent this is a rotating window, not a permanent trail. */
+export interface ServerLogLine {
+  at: number;
+  priority: number;
+  message: string;
 }
 
 /**
@@ -592,7 +616,7 @@ export function studyGuideComplete(p?: StudyGuideProgress): boolean {
 }
 
 /**
- * A time-bound thing Kironraj personally has to DO — an online assessment, a
+ * A time-bound thing Jordan personally has to DO — an online assessment, a
  * take-home task, a form to return. Deliberately not the same as an entry's
  * `deadline`, which is the ad's closing date: once you've applied, the closing
  * date is no longer actionable, and treating the two as one thing is what made

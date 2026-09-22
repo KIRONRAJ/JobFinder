@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Icon } from './Icons';
 import { useDismissed } from '../lib/dismissed';
 import { api } from '../api';
@@ -186,14 +187,23 @@ export function EventsBanner({ onOpen }: { onOpen?: (e: EventItem) => void }) {
                 )}
 
                 {e.roleUrl && (
-                  <a
-                    href={e.roleUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 rounded-xl bg-panel px-3 py-2 text-xs font-medium text-ink ring-1 ring-line hover:bg-neutral/50 transition-colors"
-                  >
-                    <span>{e.roleLabel || 'View Role'}</span>
-                  </a>
+                  e.roleUrl.startsWith('http') ? (
+                    <a
+                      href={e.roleUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-panel px-3 py-2 text-xs font-medium text-ink ring-1 ring-line hover:bg-neutral/50 transition-colors"
+                    >
+                      <span>{e.roleLabel || 'View Role'}</span>
+                    </a>
+                  ) : (
+                    <Link
+                      to={e.roleUrl}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-panel px-3 py-2 text-xs font-medium text-ink ring-1 ring-line hover:bg-neutral/50 transition-colors"
+                    >
+                      <span>{e.roleLabel || 'View Role'}</span>
+                    </Link>
+                  )
                 )}
 
                 {!e.url && !e.detailsUrl && onOpen && (

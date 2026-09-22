@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { useFlipList } from '../lib/useFlipList';
 import { playSound } from '../lib/sound';
+import { AnimatedCounter } from './AnimatedCounter';
 import {
   AppliedTag,
   CvTag,
@@ -21,11 +22,12 @@ import { STATUSES, type Application, type Status } from '../types';
 
 interface Props {
   apps: Application[];
-  onEdit: (app: Application) => void;
+  onOpen?: (app: Application) => void;
+  onEdit?: (app: Application) => void;
   onStatusChange: (app: Application, status: Status) => void;
 }
 
-export function BoardView({ apps, onEdit, onStatusChange }: Props) {
+export function BoardView({ apps, onOpen, onEdit, onStatusChange }: Props) {
   const [dragId, setDragId] = useState<string | null>(null);
   const [overCol, setOverCol] = useState<Status | null>(null);
   const [collapsedCols, setCollapsedCols] = useState<Record<string, boolean>>({
@@ -52,6 +54,7 @@ export function BoardView({ apps, onEdit, onStatusChange }: Props) {
           setOverCol={setOverCol}
           isCollapsed={Boolean(collapsedCols[key])}
           onToggleCollapse={() => toggleCollapse(key)}
+          onOpen={onOpen}
           onEdit={onEdit}
           onStatusChange={onStatusChange}
         />
@@ -75,6 +78,7 @@ function BoardColumn({
   setOverCol,
   isCollapsed,
   onToggleCollapse,
+  onOpen,
   onEdit,
   onStatusChange,
 }: {
@@ -88,12 +92,14 @@ function BoardColumn({
   setOverCol: (updater: (c: Status | null) => Status | null) => void;
   isCollapsed: boolean;
   onToggleCollapse: () => void;
-  onEdit: (app: Application) => void;
+  onOpen?: (app: Application) => void;
+  onEdit?: (app: Application) => void;
   onStatusChange: (app: Application, status: Status) => void;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
   useFlipList(listRef, cards);
 
+  const handleOpen = onOpen || onEdit;
   const pct = Math.round((cards.length / Math.max(1, apps.length)) * 100);
 
   if (isCollapsed) {
@@ -105,7 +111,9 @@ function BoardColumn({
       >
         <div className="flex flex-col items-center gap-2">
           <StatusIcon status={statusKey} />
-          <span className="font-mono text-micro font-semibold text-ink-soft">{cards.length}</span>
+          <span className="font-mono text-micro font-semibold text-ink-soft">
+            <AnimatedCounter value={cards.length} />
+          </span>
         </div>
         <div className="[writing-mode:vertical-rl] rotate-180 select-none text-meta font-semibold uppercase tracking-wider text-ink-faint">
           {label}
@@ -141,7 +149,7 @@ function BoardColumn({
           <StatusIcon status={statusKey} />
           <span className="text-meta font-bold uppercase tracking-wider text-ink">{label}</span>
           <span className="chip px-1.5 py-0 text-micro font-mono">
-            {cards.length} <span className="text-ink-faint">({pct}%)</span>
+            <AnimatedCounter value={cards.length} /> <span className="text-ink-faint">(<AnimatedCounter value={pct} />%)</span>
           </span>
         </div>
         <button
@@ -163,11 +171,11 @@ function BoardColumn({
               e.dataTransfer.setData('text/plain', a.id);
             }}
             onDragEnd={() => setDragId(null)}
-            onClick={() => onEdit(a)}
+            onClick={() => handleOpen?.(a)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
-                onEdit(a);
+                handleOpen?.(a);
               }
             }}
             tabIndex={0}

@@ -8,6 +8,8 @@ import {
   initOffset,
   readNewBatch,
   sendEvents,
+  startTelegramNotifier,
+  splitForTelegram,
 } from './notify-telegram.js';
 import fsPromises from 'node:fs/promises';
 import os from 'node:os';
@@ -29,6 +31,10 @@ test('formatMessage: mapped action with detail, no actor line for user', () => {
     msg,
     '📄 CV/cover letter generated\nCV + cover letter drafted into Pending to Apply/Spark'
   );
+});
+
+test('formatMessage: event-completed is ignored and returns null', () => {
+  assert.equal(formatMessage({ action: 'event-completed', detail: 'Concluded' }), null);
 });
 
 test('formatMessage: actor claude adds a via-Claude line', () => {
@@ -83,82 +89,84 @@ test('formatMessage: no detail, matchKey, or entryId omits the second line entir
   assert.equal(msg, '⭐ Priority set');
 });
 
-test('sendTelegram: calls curl with an argument array, never a shell string', async () => {
-  let capturedArgs;
-  const fakeExecFile = (cmd, args, cb) => {
-    capturedArgs = { cmd, args };
-    cb(null, JSON.stringify({ ok: true }));
+// Helper: a fetch stub that records the request and returns Telegram's envelope.
+function fakeFetch(body = { ok: true }) {
+  const calls = [];
+  const impl = async (url, init) => {
+    calls.push({ url, init, json: init?.body ? JSON.parse(init.body) : undefined });
+    return { ok: true, json: async () => body };
   };
+  return { impl, calls };
+}
 
+test('sendTelegram: posts a JSON body to sendMessage, no shell anywhere', async () => {
+  const { impl, calls } = fakeFetch();
   await sendTelegram('hello "world" & rm -rf /', {
     token: 'TEST_TOKEN',
     chatId: '12345',
-    execFileImpl: fakeExecFile,
+    fetchImpl: impl,
   });
 
-  assert.equal(capturedArgs.cmd, 'curl');
-  assert.ok(Array.isArray(capturedArgs.args), 'args must be an array, not a shell string');
-  assert.ok(capturedArgs.args.includes('https://api.telegram.org/botTEST_TOKEN/sendMessage'));
-  assert.ok(capturedArgs.args.includes('chat_id=12345'));
-  // Percent-encoded, not raw — see the non-ASCII test below for why.
-  assert.ok(capturedArgs.args.includes(`text=${encodeURIComponent('hello "world" & rm -rf /')}`));
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'https://api.telegram.org/botTEST_TOKEN/sendMessage');
+  assert.equal(calls[0].init.method, 'POST');
+  assert.equal(calls[0].json.chat_id, '12345');
+  // Shell metacharacters are just data in a JSON body — there is no argv and
+  // no interpreter for them to reach.
+  assert.equal(calls[0].json.text, 'hello "world" & rm -rf /');
 });
 
-test('sendTelegram: non-ASCII text (emoji, em dash, macrons) is percent-encoded, not passed raw', async () => {
-  // Regression test: on Windows, execFile mangles non-ASCII bytes in argv
-  // elements into U+FFFD before curl ever sees them — every real message
-  // here starts with an emoji, so this broke every single notification in
-  // production despite all other tests passing (they all used fake execFile
-  // or pure-ASCII text). Passing pre-encoded, pure-ASCII argv sidesteps it.
-  let capturedArgs;
-  const fakeExecFile = (cmd, args, cb) => {
-    capturedArgs = { cmd, args };
-    cb(null, JSON.stringify({ ok: true }));
-  };
-
+test('sendTelegram: non-ASCII text (emoji, em dash, macrons) survives intact', async () => {
+  // This replaces a percent-encoding test. The old transport spawned curl, and
+  // on Windows execFile mangled non-ASCII argv bytes into U+FFFD before curl
+  // saw them — every real message here starts with an emoji, so that broke
+  // every notification in production. Hand-encoding each value worked around
+  // it. A JSON request body has no argv, so UTF-8 now travels as-is and the
+  // workaround is gone; this asserts the text arrives unmodified.
+  const { impl, calls } = fakeFetch();
   const text = '📄 CV/cover letter generated\nNZ Post — Customer Service Representative';
-  await sendTelegram(text, { token: 'T', chatId: '1', execFileImpl: fakeExecFile });
+  await sendTelegram(text, { token: 'T', chatId: '1', fetchImpl: impl });
 
-  const textArg = capturedArgs.args.find((a) => a.startsWith('text='));
-  assert.equal(textArg, `text=${encodeURIComponent(text)}`);
-  assert.ok(/^text=[\x00-\x7F]*$/.test(textArg), 'the text argv element must be pure ASCII');
+  assert.equal(calls[0].json.text, text, 'text must reach Telegram byte-for-byte');
+  assert.equal(JSON.parse(calls[0].init.body).text, text);
 });
 
 test('sendTelegram: does nothing when token or chatId is missing', async () => {
   let called = false;
-  const fakeExecFile = () => {
+  const impl = async () => {
     called = true;
+    return { ok: true, json: async () => ({ ok: true }) };
   };
-  await sendTelegram('hello', { token: '', chatId: '12345', execFileImpl: fakeExecFile });
-  await sendTelegram('hello', { token: 'TOKEN', chatId: '', execFileImpl: fakeExecFile });
-  assert.equal(called, false);
+  await sendTelegram('hello', { token: '', chatId: '12345', fetchImpl: impl });
+  await sendTelegram('hello', { token: 'TOKEN', chatId: '', fetchImpl: impl });
+  assert.equal(called, false, 'must not reach the network without both credentials');
 });
 
-test('sendTelegram: curl process error resolves (never rejects) and logs', async () => {
-  const fakeExecFile = (cmd, args, cb) => {
-    cb(new Error('curl not found'));
+// Every caller of sendTelegram is a notification path. A transport failure
+// there must never take down the poll loop or the request that triggered it,
+// so all three failure shapes resolve rather than reject.
+test('sendTelegram: a network error resolves, never rejects', async () => {
+  const impl = async () => {
+    throw new Error('ECONNREFUSED');
   };
+  await assert.doesNotReject(sendTelegram('hello', { token: 'T', chatId: '1', fetchImpl: impl }));
+});
+
+test('sendTelegram: Telegram API "ok: false" resolves, never rejects', async () => {
+  const { impl } = fakeFetch({ ok: false, description: 'chat not found' });
   await assert.doesNotReject(
-    sendTelegram('hello', { token: 'T', chatId: '1', execFileImpl: fakeExecFile })
+    sendTelegram('hello', { token: 'T', chatId: 'wrong', fetchImpl: impl })
   );
 });
 
-test('sendTelegram: Telegram API "ok: false" response resolves (never rejects) and logs', async () => {
-  const fakeExecFile = (cmd, args, cb) => {
-    cb(null, JSON.stringify({ ok: false, description: 'chat not found' }));
-  };
-  await assert.doesNotReject(
-    sendTelegram('hello', { token: 'T', chatId: 'wrong', execFileImpl: fakeExecFile })
-  );
-});
-
-test('sendTelegram: unparseable curl output resolves (never rejects) and logs', async () => {
-  const fakeExecFile = (cmd, args, cb) => {
-    cb(null, 'not json');
-  };
-  await assert.doesNotReject(
-    sendTelegram('hello', { token: 'T', chatId: '1', execFileImpl: fakeExecFile })
-  );
+test('sendTelegram: an unparseable response resolves, never rejects', async () => {
+  const impl = async () => ({
+    ok: true,
+    json: async () => {
+      throw new SyntaxError('Unexpected token');
+    },
+  });
+  await assert.doesNotReject(sendTelegram('hello', { token: 'T', chatId: '1', fetchImpl: impl }));
 });
 
 test('initOffset: no offset file yet initializes to the CURRENT audit file size (no backlog replay)', async () => {
@@ -275,20 +283,16 @@ test('readNewBatch: byte offsets stay correct with multi-byte UTF-8 text', async
 // the extracted per-event dispatch loop that poll() itself uses, so this
 // exercises the real fix without needing to drive poll()'s fs.watch/timer wiring.
 test('sendEvents: an unformattable event is skipped but does not block later events in the batch', async () => {
-  const sentTexts = [];
-  const fakeExecFile = (cmd, args, cb) => {
-    sentTexts.push(args.find((a) => a.startsWith('text=')));
-    cb(null, JSON.stringify({ ok: true }));
-  };
+  const { impl, calls } = fakeFetch();
   const events = [
     { detail: 'no action field — formatMessage throws on this' },
     { action: 'create', detail: 'valid event after the bad one' },
   ];
 
-  await sendEvents(events, { token: 'T', chatId: '1', execFileImpl: fakeExecFile });
+  await sendEvents(events, { token: 'T', chatId: '1', fetchImpl: impl });
 
-  assert.equal(sentTexts.length, 1, 'only the valid event should have been sent');
-  assert.ok(decodeURIComponent(sentTexts[0].slice('text='.length)).includes('valid event after the bad one'));
+  assert.equal(calls.length, 1, 'only the valid event should have been sent');
+  assert.ok(calls[0].json.text.includes('valid event after the bad one'));
 });
 
 // Finding 2: an empty/whitespace-only offset file (e.g. a crash mid-write)
@@ -327,53 +331,46 @@ test('readNewBatch: an offset larger than the file (shrunk audit log) resyncs to
   assert.equal(malformedCount, 0);
 });
 
-test('sendTelegramQuiz: formats sendPoll args with quiz type and percent-encoded options', async () => {
-  let capturedArgs = null;
-  const fakeExecFile = (_cmd, args, _opts, cb) => {
-    capturedArgs = args;
-    const fn = typeof _opts === 'function' ? _opts : cb;
-    if (fn) fn(null, JSON.stringify({ ok: true, result: { poll: { id: 'poll_1' } } }));
-  };
+test('sendTelegramQuiz: sends a sendPoll body with quiz type and native array options', async () => {
+  const { impl, calls } = fakeFetch({ ok: true, result: { poll: { id: 'poll_1' } } });
 
-  const res = await sendTelegramQuiz(
-    '12345',
-    'What is 2+2?',
-    ['3', '4', '5'],
-    1,
-    'Math basics',
-    { token: 'TEST_TOKEN', execFileImpl: fakeExecFile }
-  );
-
-  assert.equal(res.ok, true);
-  assert.ok(capturedArgs.includes('https://api.telegram.org/botTEST_TOKEN/sendPoll'));
-  assert.ok(capturedArgs.includes('type=quiz'));
-  assert.ok(capturedArgs.includes('correct_option_id=1'));
-  assert.ok(capturedArgs.includes(`chat_id=12345`));
-  assert.ok(capturedArgs.some((a) => a.startsWith('options=')));
-  assert.ok(capturedArgs.some((a) => a.startsWith('explanation=')));
-});
-
-test('downloadTelegramFile: gets file path and downloads via curl', async () => {
-  const calls = [];
-  const fakeExecFile = (_cmd, args, _opts, cb) => {
-    calls.push(args);
-    const fn = typeof _opts === 'function' ? _opts : cb;
-    if (calls.length === 1) {
-      fn(null, JSON.stringify({ ok: true, result: { file_path: 'voice/sample.oga' } }));
-    } else {
-      fn(null, '');
-    }
-  };
-
-  const res = await downloadTelegramFile('file_abc', 'C:\\temp\\voice.ogg', {
+  const res = await sendTelegramQuiz('12345', 'What is 2+2?', ['3', '4', '5'], 1, 'Math basics', {
     token: 'TEST_TOKEN',
-    execFileImpl: fakeExecFile,
+    fetchImpl: impl,
   });
 
   assert.equal(res.ok, true);
-  assert.equal(calls.length, 2);
-  assert.ok(calls[0][3].includes('getFile?file_id=file_abc'));
-  assert.ok(calls[1][3].includes('file/botTEST_TOKEN/voice/sample.oga'));
+  assert.equal(calls[0].url, 'https://api.telegram.org/botTEST_TOKEN/sendPoll');
+  const body = calls[0].json;
+  assert.equal(body.type, 'quiz');
+  assert.equal(body.correct_option_id, 1);
+  assert.equal(body.chat_id, '12345');
+  assert.equal(body.is_anonymous, false);
+  // Options travel as a real JSON array now, not a percent-encoded string.
+  assert.deepEqual(body.options, ['3', '4', '5']);
+  assert.equal(body.explanation, 'Math basics');
+});
+
+test('downloadTelegramFile: resolves the file path then writes the bytes to disk', async () => {
+  const dir = await makeTempDir();
+  const dest = path.join(dir, 'voice.ogg');
+  const seen = [];
+  const impl = async (url) => {
+    seen.push(url);
+    if (url.includes('/getFile')) {
+      return { ok: true, json: async () => ({ ok: true, result: { file_path: 'voice/file_1.oga' } }) };
+    }
+    return { ok: true, arrayBuffer: async () => new TextEncoder().encode('OGGDATA').buffer };
+  };
+
+  const res = await downloadTelegramFile('file_abc', dest, { token: 'T', fetchImpl: impl });
+
+  assert.equal(res.ok, true);
+  assert.equal(res.localPath, dest);
+  assert.ok(seen[0].endsWith('/botT/getFile'), 'first call resolves the file path');
+  assert.equal(seen[1], 'https://api.telegram.org/file/botT/voice/file_1.oga');
+  assert.equal(await fsPromises.readFile(dest, 'utf8'), 'OGGDATA');
+  await fsPromises.rm(dir, { recursive: true, force: true });
 });
 
 test('readNewBatch: fast-forwards offset when backlog exceeds maxBacklogBytes to avoid spam', async () => {
@@ -391,16 +388,13 @@ test('readNewBatch: fast-forwards offset when backlog exceeds maxBacklogBytes to
 });
 
 test('sendEvents: does not send documents for stale events older than 10 minutes', async () => {
-  let docSent = false;
-  const fakeExecFile = (_cmd, args, _opts, cb) => {
-    const fn = typeof _opts === 'function' ? _opts : cb;
-    if (args.some((a) => String(a).includes('sendDocument'))) {
-      docSent = true;
-    }
-    fn(null, JSON.stringify({ ok: true }));
+  const seen = [];
+  const impl = async (url) => {
+    seen.push(String(url));
+    return { ok: true, json: async () => ({ ok: true }) };
   };
 
-  // Event from 1 hour ago
+  // Event from an hour ago — a replayed backlog line, not fresh work.
   const staleEvent = {
     action: 'cv-generated',
     at: Date.now() - 60 * 60 * 1000,
@@ -408,13 +402,96 @@ test('sendEvents: does not send documents for stale events older than 10 minutes
     matchKey: 'test-co-role',
   };
 
-  await sendEvents([staleEvent], {
-    token: 'T',
-    chatId: '123',
-    execFileImpl: fakeExecFile,
-  });
+  await sendEvents([staleEvent], { token: 'T', chatId: '123', fetchImpl: impl });
 
-  assert.equal(docSent, false, 'stale event should not trigger document upload');
+  assert.ok(
+    !seen.some((u) => u.includes('sendDocument')),
+    'stale event should not trigger a document upload'
+  );
 });
 
 
+
+// Regression: a fresh install has no audit-log.jsonl yet, so fs.watch throws
+// ENOENT. That throw used to escape and take the setInterval fallback with it,
+// leaving the notifier permanently off until the next restart.
+test('startTelegramNotifier: survives a missing audit log and still schedules the poll', async () => {
+  const dir = await makeTempDir();
+  const missingAudit = path.join(dir, 'does-not-exist.jsonl');
+  const offsetFile = path.join(dir, 'offset.txt');
+
+  const realSetInterval = globalThis.setInterval;
+  let scheduled = null;
+  // Record the interval and hand back a no-op handle. Returning a real timer
+  // here would keep the event loop alive and hang the runner.
+  globalThis.setInterval = (_fn, ms) => {
+    scheduled = ms;
+    return { unref() {}, ref() {} };
+  };
+
+  try {
+    startTelegramNotifier({
+      auditFilePath: missingAudit,
+      offsetFilePath: offsetFile,
+      token: 'T',
+      chatId: '123',
+    });
+    // startTelegramNotifier kicks off an async chain; let it settle.
+    await new Promise((r) => realSetInterval && setTimeout(r, 50));
+  } finally {
+    globalThis.setInterval = realSetInterval;
+  }
+
+  assert.equal(scheduled, 30_000, 'poll interval must still be scheduled without a watchable file');
+  assert.equal(
+    await fsPromises.readFile(offsetFile, 'utf8'),
+    '0',
+    'offset should initialise to 0 for a not-yet-created audit log'
+  );
+  await fsPromises.rm(dir, { recursive: true, force: true });
+});
+
+// Regression: /today produced 7,094 chars against Telegram's 4,096 limit and
+// was rejected outright with "Bad Request: message is too long" — silently, so
+// the command just never replied. The 8:30am briefing had been failing the
+// same way since at least 8 Sep 2026.
+test('splitForTelegram: short text is left as a single chunk', () => {
+  assert.deepEqual(splitForTelegram('hello'), ['hello']);
+});
+
+test('splitForTelegram: splits on paragraph boundaries, every chunk under the limit', () => {
+  const para = 'x'.repeat(1000);
+  const chunks = splitForTelegram(Array(10).fill(para).join('\n\n'));
+  assert.ok(chunks.length > 1);
+  for (const c of chunks) assert.ok(c.length <= 3800, `chunk was ${c.length}`);
+});
+
+test('splitForTelegram: hard-splits a single paragraph that is itself too long', () => {
+  // The old chunker pushed this through unsplit — one 9,000-char paragraph
+  // (a pasted stack trace or CLI error) still got rejected by Telegram.
+  const chunks = splitForTelegram('y'.repeat(9000));
+  assert.ok(chunks.length >= 3);
+  for (const c of chunks) assert.ok(c.length <= 3800, `chunk was ${c.length}`);
+  assert.equal(chunks.join('').length, 9000, 'no content may be dropped');
+});
+
+test('sendTelegram: an over-limit message is sent as multiple requests', async () => {
+  const { impl, calls } = fakeFetch();
+  await sendTelegram('z'.repeat(9000), { token: 'T', chatId: '1', fetchImpl: impl });
+  assert.ok(calls.length >= 3, `expected several sends, got ${calls.length}`);
+  for (const c of calls) assert.ok(c.json.text.length <= 3800);
+});
+
+test('sendTelegram: the keyboard is attached to the last chunk only', async () => {
+  const { impl, calls } = fakeFetch();
+  const markup = { keyboard: [[{ text: 'Today' }]] };
+  await sendTelegram('w'.repeat(9000), {
+    token: 'T',
+    chatId: '1',
+    replyMarkup: markup,
+    fetchImpl: impl,
+  });
+  const withMarkup = calls.filter((c) => c.json.reply_markup !== undefined);
+  assert.equal(withMarkup.length, 1, 'keyboard must not repeat between fragments');
+  assert.equal(calls[calls.length - 1].json.reply_markup.keyboard[0][0].text, 'Today');
+});
