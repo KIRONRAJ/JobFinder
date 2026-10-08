@@ -14,6 +14,12 @@
 
 > 🔒 **Code-Only Showcase Note**: This repository contains the complete source code for the full-stack application and its toolchains. No real personal resumes, employer communications, or credentials are included. A zero-PII demo dataset is bundled (`npm run seed`) so reviewers can immediately run and explore a fully populated dashboard.
 
+## 🖥️ Project Mockups
+
+| Laptop Mockup | Phone Mockup |
+|---|---|
+| ![image1](image1) | ![image2](image2) |
+
 ---
 
 ## 🏛️ System Architecture
