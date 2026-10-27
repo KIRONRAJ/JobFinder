@@ -188,11 +188,13 @@ app.use(express.json({ limit: '2mb' }));
  */
 function isAllowedOrigin(origin) {
   if (!origin) return true;
-  // Localhost, Tailscale, Homeserver, ts.net
+  // Localhost, Tailscale, this machine's own hostname (read at runtime), ts.net
+  const ownHost = os.hostname().toLowerCase().replace(/[^a-z0-9-]/g, '');
   if (
-    /^https?:\/\/(localhost|127\.0\.0\.1|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}|homeserver|[a-z0-9-]+\.ts\.net)(:\d+)?$/i.test(
-      origin
-    )
+    new RegExp(
+      `^https?:\\/\\/(localhost|127\\.0\\.0\\.1|100\\.(6[4-9]|[7-9]\\d|1[01]\\d|12[0-7])\\.\\d{1,3}\\.\\d{1,3}|${ownHost}|[a-z0-9-]+\\.ts\\.net)(:\\d+)?$`,
+      'i'
+    ).test(origin)
   ) {
     return true;
   }
@@ -3114,7 +3116,7 @@ app.patch('/api/study/:guide', async (req, res) => {
 
 // ---------- folders ----------
 // Opening the folder in Explorer is now done client-side (see api.ts's
-// openFolder) — this server runs on homeserver, a different machine from the
+// openFolder) — this server runs on the home server, a different machine from the
 // browser, so it has no way to launch a program on the client PC.
 
 // Reports whether each entry's company folder actually has CV/cover-letter

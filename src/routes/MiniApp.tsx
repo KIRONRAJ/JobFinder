@@ -83,7 +83,7 @@ export function MiniApp() {
     }
   }, [previewApp, followUpApp, quickAddOpen]);
 
-  // 3. Load applications from Homeserver
+  // 3. Load applications from the server
   const loadApps = useCallback(async () => {
     try {
       if (apps.length === 0) setLoading(true);
@@ -271,7 +271,7 @@ export function MiniApp() {
               <h1 className="text-sm font-bold tracking-tight text-ink leading-none">JobSearchHQ</h1>
               <p className="text-[10px] text-ink-soft mt-0.5 flex items-center gap-1">
                 <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                Live Homeserver Node
+                Live Server Node
               </p>
             </div>
           </div>

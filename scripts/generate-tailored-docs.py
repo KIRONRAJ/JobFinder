@@ -42,7 +42,7 @@ COLOR_MUTED = RGBColor(91, 107, 120)
 A4_WIDTH = Inches(8.27)
 A4_HEIGHT = Inches(11.69)
 
-FONT = 'Calibri'      # embeds as Carlito on homeserver (fonts-crosextra-carlito), not Noto Serif
+FONT = 'Calibri'      # embeds as Carlito on the server (fonts-crosextra-carlito), not Noto Serif
 BODY_PT = 10.0        # ATS analyzer guideline: 10-12pt body text
 CL_BODY_PT = 11.0     # cover letter body: SEEK recommends 11-12pt; a 330-365 word letter still fits one A4 page at 11pt
 

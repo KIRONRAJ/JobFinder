@@ -12,7 +12,11 @@
 // which would need resolve-then-pin-the-socket. Proportionate for a
 // single-user tool where the caller is already authenticated.
 
-const BLOCKED_HOSTNAMES = new Set(['localhost', 'ip6-localhost', 'ip6-loopback', 'homeserver']);
+// Block this machine's own hostname alongside the generic loopback names, resolved at runtime
+// so no real host name is baked into the source.
+import os from 'node:os';
+
+const BLOCKED_HOSTNAMES = new Set(['localhost', 'ip6-localhost', 'ip6-loopback', os.hostname().toLowerCase()]);
 
 export function isPrivateIPv4(host) {
   const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);

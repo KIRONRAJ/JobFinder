@@ -138,7 +138,7 @@ Real screenshots of the app running on the bundled demo data (`npm run seed`).
 
 ### 1. Clone & Install
 ```bash
-git clone https://github.com/JORDAN/JobFinder.git
+git clone https://github.com/KIRONRAJ/JobFinder.git
 cd JobFinder
 npm install
 ```

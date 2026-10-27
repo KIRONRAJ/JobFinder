@@ -268,7 +268,7 @@ export const api = {
       body: JSON.stringify({ note: note || '', mode }),
     }),
 
-  // The Express server now runs on homeserver (Linux), a different machine from
+  // The Express server now runs on the home server (Linux), a different machine from
   // the browser, so it can't launch Explorer on the client PC — that has to
   // happen client-side via a registered `openfolder://` protocol handler
   // (see Required Documents/README or ask Claude for the Windows setup).

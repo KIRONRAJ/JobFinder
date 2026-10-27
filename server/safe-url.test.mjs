@@ -1,3 +1,4 @@
+import os from 'node:os';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { assertFetchableUrl, isFetchableUrl } from './safe-url.js';
@@ -17,7 +18,7 @@ test('safe-url: blocks loopback and local names', () => {
     'http://127.0.0.1:5178/api/applications',
     'http://localhost:5178/',
     'http://[::1]:5178/',
-    'http://homeserver:5178/',
+    `http://${os.hostname()}:5178/`,
     'http://printer.local/',
   ]) {
     assert.equal(isFetchableUrl(u), false, `${u} should be blocked`);

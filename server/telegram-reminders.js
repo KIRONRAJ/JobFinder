@@ -257,7 +257,7 @@ export async function checkEventReminders({
 }
 
 /**
- * Start 24/7 background reminder watcher on Homeserver
+ * Start 24/7 background reminder watcher on the server
  */
 export function startEventReminderScheduler({
   getEventsStore,

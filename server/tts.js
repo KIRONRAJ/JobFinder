@@ -1,5 +1,5 @@
 // Speech synthesis service powered by Microsoft Edge Neural TTS.
-// Zero strain on Homeserver, zero cost, human-quality neural voices.
+// Zero strain on the server, zero cost, human-quality neural voices.
 // Supports native Telegram OGG Opus voice notes and Web MP3 streams.
 
 import fs from 'node:fs';

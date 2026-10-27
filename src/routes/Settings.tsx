@@ -288,7 +288,7 @@ function VoiceSettings() {
           <div>
             <h3 className={matcha ? 'mx-display-sm font-display-matcha font-normal' : 'text-meta font-medium text-ink'}>Voice Assistant Personality</h3>
             <p className="mt-0.5 text-micro leading-snug text-ink-soft">
-              Active Voice: <span className="font-semibold text-accent">{data.label}</span>. Powered by Microsoft Edge Neural Speech with zero server strain on Homeserver.
+              Active Voice: <span className="font-semibold text-accent">{data.label}</span>. Powered by Microsoft Edge Neural Speech with zero server strain on the server.
             </p>
           </div>
           <button

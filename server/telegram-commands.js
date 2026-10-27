@@ -43,7 +43,7 @@ export function getDashboardUrl() {
       }
     }
   }
-  return 'http://homeserver:5178';
+  return 'http://localhost:5178';
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -3443,7 +3443,7 @@ export async function handleUpdate(
           'Usage: /cvgen <company>',
           'Example: /cvgen Spark',
           '',
-          '(っ•ᴗ•)っ Queues the automated CV generator on Homeserver for this role.',
+          '(っ•ᴗ•)っ Queues the automated CV generator on the server for this role.',
         ].join('\n'),
         { token, chatId, replyMarkup: MAIN_MENU_KEYBOARD }
       );
@@ -3485,7 +3485,7 @@ export async function handleUpdate(
             `💼  Role: ${res.role}`,
             '',
             '───────────────',
-            '(っ•ᴗ•)っ The CV generator worker is now crafting your tailored CV and cover letter on Homeserver!',
+            '(っ•ᴗ•)っ The CV generator worker is now crafting your tailored CV and cover letter on the server!',
             'You will receive an alert here as soon as it is ready.',
             '',
             '(•̀ᴗ•́)و Quality tailored application incoming!',
