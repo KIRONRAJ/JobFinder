@@ -946,7 +946,7 @@ export async function interpretVoiceMessage(
   try {
     factsText = await fsPromises.readFile(candidateFactsPath, 'utf8');
   } catch {
-    factsText = 'Candidate: Jordan Smith. Master of IT (Cyber Security), Whitecliffe. NZ Open Work Visa.';
+    factsText = 'Candidate: Jordan Smith. Master of IT (Cyber Security), Riverside Institute of Technology. NZ Open Work Visa.';
   }
 
   const audioBytes = await fsPromises.readFile(audioFilePath);

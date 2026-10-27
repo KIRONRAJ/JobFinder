@@ -178,6 +178,21 @@ The built-in **Insights** engine tracks:
 
 ---
 
+## 🔐 Security Model & Hardening Notes
+
+JobFinder is a **single-user tool you run yourself**, not a multi-user service. Know what you are switching on:
+
+- **One shared password, no accounts.** Every `/api` route needs the signed session cookie, the MCP bearer token or a verified Telegram sign-in. The server binds to `127.0.0.1` (plus `TAILSCALE_IP` if you set it). Do not bind it to `0.0.0.0` or put it on the open internet without a TLS reverse proxy.
+- **The built-in terminal runs AI agents with permission prompts bypassed** (`claude --dangerously-skip-permissions`, behind a small deny-list). Anyone holding your session can therefore run commands as your user, and a hostile job ad is untrusted input to those agents. Run it on a machine you trust, never share the password, and keep the app off shared hosts.
+- **The Cloudflare tunnel is opt-in** (`JOBHQ_TUNNEL=on`). It publishes the app at a public URL; the password still gates it, but only turn it on if you need the Telegram Mini App.
+- **Telegram sign-in fails closed.** It needs both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`, and only that chat id gets in.
+- **Your data stays local.** `data/*` and `.env` are git-ignored. Never commit a real `data/` folder, resume, transcript or token to a fork.
+- **Known gaps:** the Content-Security-Policy is report-only, session cookies have no `Secure` flag (the app is served over plain http), outbound-URL checks do not defeat DNS rebinding, and `npm audit` lists two moderate `react-router` advisories that need a major upgrade.
+
+Report vulnerabilities by opening a private security advisory on this repository.
+
+---
+
 ## 📄 License & Attribution
 
 This project is open-source under the [MIT License](LICENSE).  

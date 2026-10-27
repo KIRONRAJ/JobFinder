@@ -57,7 +57,7 @@ test('generateTailoredDocSpec: parses Gemini response into valid doc spec', asyn
       {
         role: 'L2 NOC Engineer',
         company: 'Northline Broadband',
-        period: '11/2017 – 06/2019 | Thrissur, Kerala',
+        period: '11/2017 – 06/2019 | Riverton, India',
         bullets: ['Monitored network telemetry']
       }
     ],

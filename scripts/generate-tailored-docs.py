@@ -48,7 +48,7 @@ CL_BODY_PT = 11.0     # cover letter body: SEEK recommends 11-12pt; a 330-365 wo
 
 DEFAULT_CERTS = [
     'Red Hat Certified System Administrator (RHCSA, RHEL 7) - Certificate ID: 170-264-105 (Earned Dec 2017)',
-    'CCNA Routing & Switching Coursework - Vidya Academy of Science and Technology (training certificate)',
+    'CCNA Routing & Switching Coursework - Meridian Academy of Science and Technology (training certificate)',
     'cPanel Professional Certification (CPP) & cPanel & WHM Administrator (CWA) - held 2021-2022',
     'freeCodeCamp Responsive Web Design Certification - approx. 300 hours of technical coursework'
 ]
@@ -213,8 +213,8 @@ def order_work_history(parsed_history, target_role=""):
     a retitled 'Production Labourer / Operational Support' once matched 'support' and jumped
     ahead of Northline."""
     is_trade = bool(re.search(r'(mechanic|line|labour|trade|trainee|driver|warehouse|packaging)', target_role, re.I))
-    order = (['tuatara', 'keralavision', 'poornam'] if is_trade
-             else ['poornam', 'keralavision', 'self', 'tuatara'])
+    order = (['brewery', 'northline', 'cascade'] if is_trade
+             else ['cascade', 'northline', 'self', 'brewery'])
 
     def rank(j):
         company = j.get('company', '').lower()

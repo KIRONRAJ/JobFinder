@@ -1542,9 +1542,9 @@ test('formatGmailFetchSummary: handles clean slate when no job updates found', (
 
 test('verifyTelegramWebAppData: validates genuine Telegram HMAC signature and user ID', () => {
   const botToken = '123456:TEST_BOT_TOKEN_XYZ';
-  const chatId = '440907567';
+  const chatId = '100000001';
   const authDate = Math.floor(Date.now() / 1000);
-  const userJson = JSON.stringify({ id: 440907567, first_name: 'Kiran' });
+  const userJson = JSON.stringify({ id: 100000001, first_name: 'Jordan' });
 
   const params = new URLSearchParams();
   params.set('auth_date', String(authDate));
@@ -1564,15 +1564,15 @@ test('verifyTelegramWebAppData: validates genuine Telegram HMAC signature and us
   const result = verifyTelegramWebAppData(initDataString, botToken, chatId);
 
   assert.equal(result.ok, true);
-  assert.equal(result.user?.id, 440907567);
-  assert.equal(result.user?.first_name, 'Kiran');
+  assert.equal(result.user?.id, 100000001);
+  assert.equal(result.user?.first_name, 'Jordan');
 });
 
 test('verifyTelegramWebAppData: rejects tampered data or mismatched hash', () => {
   const botToken = '123456:TEST_BOT_TOKEN_XYZ';
-  const chatId = '440907567';
+  const chatId = '100000001';
 
-  const badData = 'auth_date=1626425533&query_id=ABC&user=%7B%22id%22%3A440907567%7D&hash=invalid_hash_value';
+  const badData = 'auth_date=1626425533&query_id=ABC&user=%7B%22id%22%3A100000001%7D&hash=invalid_hash_value';
   const result = verifyTelegramWebAppData(badData, botToken, chatId);
 
   assert.equal(result.ok, false);
@@ -1581,7 +1581,7 @@ test('verifyTelegramWebAppData: rejects tampered data or mismatched hash', () =>
 
 test('verifyTelegramWebAppData: rejects unauthorized Telegram user ID', () => {
   const botToken = '123456:TEST_BOT_TOKEN_XYZ';
-  const authorizedChatId = '440907567';
+  const authorizedChatId = '100000001';
   const authDate = Math.floor(Date.now() / 1000);
   const attackerUser = JSON.stringify({ id: 999999999, first_name: 'Attacker' });
 
@@ -1811,3 +1811,18 @@ test('handleUpdate: /fit <company> sends fit analysis card', async () => {
   assert.ok(calls[0].text.includes('90/100'));
 });
 
+test('verifyTelegramWebAppData: fails closed without an owner chat id or a user', () => {
+  const botToken = '123456:TEST_BOT_TOKEN_XYZ';
+  const sign = (fields) => {
+    const params = new URLSearchParams(fields);
+    const check = [...params.entries()].map(([k, v]) => `${k}=${v}`).sort().join('\n');
+    const secret = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
+    params.set('hash', crypto.createHmac('sha256', secret).update(check).digest('hex'));
+    return params.toString();
+  };
+  const authDate = String(Math.floor(Date.now() / 1000));
+  const withUser = sign({ auth_date: authDate, user: JSON.stringify({ id: 7 }) });
+  assert.equal(verifyTelegramWebAppData(withUser, botToken, undefined).ok, false, 'no TELEGRAM_CHAT_ID');
+  assert.equal(verifyTelegramWebAppData(sign({ auth_date: authDate }), botToken, '7').ok, false, 'no user field');
+  assert.equal(verifyTelegramWebAppData(withUser, botToken, '7').ok, true);
+});

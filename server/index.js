@@ -375,6 +375,8 @@ export function verifyTelegramWebAppData(
   allowedChatId = process.env.TELEGRAM_CHAT_ID
 ) {
   if (!initDataString || !botToken) return { ok: false, error: 'Missing initData or botToken' };
+  // Fail closed: without a configured owner chat id, any Telegram user who finds the bot could sign in.
+  if (!allowedChatId) return { ok: false, error: 'TELEGRAM_CHAT_ID is not set' };
 
   try {
     const params = new URLSearchParams(initDataString);
@@ -403,13 +405,11 @@ export function verifyTelegramWebAppData(
       return { ok: false, error: 'Init data expired' };
     }
 
-    let user = null;
     const userStr = params.get('user');
-    if (userStr) {
-      user = JSON.parse(userStr);
-      if (allowedChatId && String(user.id) !== String(allowedChatId)) {
-        return { ok: false, error: 'Unauthorized Telegram user ID' };
-      }
+    if (!userStr) return { ok: false, error: 'Missing Telegram user' };
+    const user = JSON.parse(userStr);
+    if (String(user.id) !== String(allowedChatId)) {
+      return { ok: false, error: 'Unauthorized Telegram user ID' };
     }
 
     return { ok: true, user };
@@ -4961,7 +4961,10 @@ app.listen(PORT, '127.0.0.1', () => {
   setTimeout(analysisSweepSafely, 45_000);
   setInterval(analysisSweepSafely, 3 * 60_000);
 
-  const tunnelProcess = startTunnel({ port: PORT });
+  // Opt-in: a public Cloudflare quick tunnel makes the app reachable from the internet.
+  let tunnelProcess = null;
+  if (process.env.JOBHQ_TUNNEL === 'on') tunnelProcess = startTunnel({ port: PORT });
+  else console.log('  telegram tunnel: off (set JOBHQ_TUNNEL=on in .env to expose the app via Cloudflare)');
   if (tunnelProcess) {
     // A listener replaces Node's default exit-on-signal, so exit explicitly —
     // without it `pkill`/`systemctl stop` were silently ignored.
