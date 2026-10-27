@@ -11,17 +11,35 @@ import type { Application, Fit, RoleType, Source } from '../types';
 
 const DAY_MS = 86_400_000;
 
+/** Whether this application has ever reached the interview stage (active or completed).
+ *  Checks current status, statusHistory, interview object, and activity status transitions. */
+export function hasReachedInterview(a: Application): boolean {
+  if (a.status === 'interview' || a.status === 'offer') return true;
+  if (Boolean(a.interview)) return true;
+  if (a.statusHistory?.some((h) => h.status === 'interview' || h.status === 'offer')) return true;
+  if (a.activity?.some((act) => act.kind === 'status' && act.text.toLowerCase().includes('interview'))) return true;
+  return false;
+}
+
+/** Whether this application has received an actual response or decision from the employer.
+ *  Includes rejections, interview invites/stages, offers, or positive progress signals. */
+export function hasReceivedResponse(a: Application): boolean {
+  if (a.status === 'rejected' || a.status === 'interview' || a.status === 'offer') return true;
+  if (Boolean(a.progressing) || Boolean(a.rejection)) return true;
+  if (hasReachedInterview(a)) return true;
+  return false;
+}
+
 /** A reply/interview signal: any status move past "applied", or the
  *  `progressing` flag Claude sets for a positive signal that hasn't earned a
  *  status change yet (e.g. psychometric testing). Rejections count as a
  *  reply — silence is the thing being measured, not a good outcome. */
 function gotReply(a: Application): boolean {
-  if (a.progressing) return true;
-  return a.status === 'interview' || a.status === 'offer' || a.status === 'rejected';
+  return hasReceivedResponse(a);
 }
 
 function gotInterview(a: Application): boolean {
-  return a.status === 'interview' || a.status === 'offer';
+  return hasReachedInterview(a);
 }
 
 /** Only applications that have actually left "researching" count toward

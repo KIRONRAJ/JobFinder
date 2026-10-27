@@ -1,3 +1,6 @@
+import { MatchaPageHead } from './matcha/MatchaPageHead';
+import { MatchaAgendaGrid } from './matcha/MatchaAgendaGrid';
+import { useMatcha } from '../lib/useMatcha';
 import { useState } from 'react';
 import { Icon } from './Icons';
 import { CompanyAvatar } from './CompanyAvatar';
@@ -20,7 +23,7 @@ interface Props {
 
 type Kind = 'deadline' | 'followup' | 'nextaction' | 'interview' | 'outreach' | 'task';
 
-interface AgendaItem {
+export interface AgendaItem {
   id: string;
   /** id of the source Application or OutreachEntry, so the row can be opened
    *  without re-parsing a composite key back apart. */
@@ -71,7 +74,7 @@ function buildAgenda(apps: Application[], outreach: OutreachEntry[]): AgendaItem
   const items: AgendaItem[] = [];
 
   for (const a of apps) {
-    if (a.deadline && a.status !== 'rejected' && a.status !== 'withdrawn' && a.status !== 'offer') {
+    if (a.deadline && a.status !== 'rejected' && a.status !== 'withdrawn' && a.status !== 'skipped' && a.status !== 'offer') {
       items.push({
         id: `${a.id}-deadline`,
         entryId: a.id,
@@ -352,6 +355,7 @@ function buildMonthGrid(year: number, month: number): Date[] {
 
 export function AgendaView({ apps, outreach, onOpenApp, onOpenOutreach, toast }: Props) {
   const { setApps, refresh } = useAppData();
+  const matcha = useMatcha();
   const appsById = new Map(apps.map((a) => [a.id, a]));
   const outreachById = new Map(outreach.map((e) => [e.id, e]));
 
@@ -444,6 +448,7 @@ export function AgendaView({ apps, outreach, onOpenApp, onOpenOutreach, toast }:
 
   return (
     <div className="space-y-6">
+      {matcha && <MatchaPageHead eyebrow="Pipeline" title="Agenda" />}
       {overdueItems.length > 0 && (
         <div>
           <button
@@ -472,9 +477,9 @@ export function AgendaView({ apps, outreach, onOpenApp, onOpenOutreach, toast }:
         </div>
       )}
 
-      <div className="panel p-4 sm:p-5">
+      <div className="mx-agenda-grid panel p-4 sm:p-5">
         <div className="mb-4 flex items-center justify-between gap-3">
-          <h2 className="text-subhead font-medium text-ink">{monthLabel}</h2>
+          <h2 className="mx-agenda-month text-subhead font-medium text-ink">{monthLabel}</h2>
           <div className="flex items-center gap-1.5">
             <button onClick={goToday} className="btn-ghost">
               Today
@@ -496,6 +501,17 @@ export function AgendaView({ apps, outreach, onOpenApp, onOpenOutreach, toast }:
           </div>
         </div>
 
+        {matcha ? (
+          <MatchaAgendaGrid
+            days={grid.map((d) => ({ dateStr: toDateStr(d), date: d, inMonth: d.getMonth() === cursor.month }))}
+            itemsByDate={itemsByDate}
+            todayStr={todayStr}
+            selected={selected}
+            onSelect={setSelected}
+            dotClass={(it, overdue) => kindDotColor(it.kind, overdue)}
+          />
+        ) : (
+          <>
         <div className="grid grid-cols-7 gap-1 section-label">
           {WEEKDAY_LABELS.map((w) => (
             <div key={w} className="px-1 pb-1.5 text-center">
@@ -543,6 +559,8 @@ export function AgendaView({ apps, outreach, onOpenApp, onOpenOutreach, toast }:
             );
           })}
         </div>
+          </>
+        )}
       </div>
 
       <div>

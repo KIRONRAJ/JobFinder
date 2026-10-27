@@ -1,3 +1,5 @@
+import { useMatcha } from '../lib/useMatcha';
+import { MatchaInsightsHero } from './matcha/MatchaInsightsHero';
 import {
   Bar,
   BarChart,
@@ -35,6 +37,8 @@ import {
   responseTimeHistogram,
   ghostedApplications,
   sourceFitMatrix,
+  hasReachedInterview,
+  hasReceivedResponse,
   type ConversionRow,
 } from '../lib/outcomes';
 import { ROLE_TYPES, type Application, type Fit } from '../types';
@@ -48,11 +52,21 @@ const fitColors = (t: ChartTheme): Record<Fit, string> => ({
   stretch: t.amber,
 });
 
-function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
+function ChartCard({
+  title,
+  children,
+  className = '',
+}: {
+  title: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
-    <div className="panel p-5">
-      <h3 className="mb-4 section-label">{title}</h3>
-      {children}
+    <div className={`panel p-5 overflow-hidden flex flex-col justify-between ${className}`}>
+      <div>
+        <h3 className="mb-4 section-label">{title}</h3>
+        {children}
+      </div>
     </div>
   );
 }
@@ -169,6 +183,12 @@ function responseDays(a: Application): number | null {
   return diff >= 0 ? diff / DAY_MS : null;
 }
 
+/** Mean days from Applied to the next status move, and how many entries it is based on. */
+function avgResponseDays(apps: Application[]): { avg: number | null; n: number } {
+  const days = apps.map(responseDays).filter((d): d is number => d !== null);
+  return { avg: days.length > 0 ? days.reduce((s, d) => s + d, 0) / days.length : null, n: days.length };
+}
+
 const WEEKS_FOR_SPARKLINE = 8;
 
 /** A single glanceable number, its unit, and an optional trend cue — the
@@ -222,6 +242,7 @@ function KpiTile({
   trend?: { node: React.ReactNode };
   empty?: string;
 }) {
+  const matcha = useMatcha();
   return (
     <div className="kpi-tile panel p-4">
       <h3 className="mb-1 truncate section-label">{label}</h3>
@@ -230,7 +251,7 @@ function KpiTile({
       ) : (
         <>
           <div className="flex items-baseline gap-1.5">
-            <span className="text-title font-semibold tabular-nums tracking-[-0.02em]">
+            <span className={matcha && /^[\d.,%]+$/.test(value) ? "mx-numeral-md font-display-matcha" : "text-title font-semibold tabular-nums tracking-[-0.02em]"}>
               <CountUpValue text={value} />
             </span>
             <span className="truncate text-micro text-ink-faint">{unit}</span>
@@ -242,13 +263,13 @@ function KpiTile({
   );
 }
 
-/** The dashboard's top-of-page KPI strip — the four numbers Jordan checks
+/** The dashboard's top-of-page KPI strip — the four numbers Kironraj checks
  *  first, before any chart. 2-up on mobile so it stays a glance, not a full
  *  screen of tiles; 4-up once there's room. Values were previously split
  *  between a "This week vs last"/"Average response time" pair and a separate
  *  "Response time spread"/"Likely gone quiet" section further down the page —
  *  merged here so the headline numbers aren't buried below "What's working". */
-function KpiRow({ apps, theme }: { apps: Application[]; theme: ChartTheme }) {
+function KpiRow({ apps, theme, compact = false }: { apps: Application[]; theme: ChartTheme; compact?: boolean }) {
   const now = Date.now();
   const thisWeek = apps.filter((a) => a.created && now - a.created < 7 * DAY_MS).length;
   const lastWeek = apps.filter(
@@ -268,9 +289,7 @@ function KpiRow({ apps, theme }: { apps: Application[]; theme: ChartTheme }) {
     ).length;
   });
 
-  const responses = apps.map(responseDays).filter((d): d is number => d !== null);
-  const avgResponse =
-    responses.length > 0 ? responses.reduce((s, d) => s + d, 0) / responses.length : null;
+  const { avg: avgResponse, n: responseN } = avgResponseDays(apps);
 
   const responseStats = responseTimeStats(apps);
   const { apps: ghosts, thresholdDays } = ghostedApplications(apps);
@@ -298,7 +317,7 @@ function KpiRow({ apps, theme }: { apps: Application[]; theme: ChartTheme }) {
   );
 
   return (
-    <div ref={rowRef} className="grid grid-cols-2 gap-3 md:grid-cols-4">
+    <div ref={rowRef} className={`grid grid-cols-2 gap-3 ${compact ? 'md:grid-cols-2' : 'md:grid-cols-4'}`}>
       <KpiTile
         label="This week"
         value={String(thisWeek)}
@@ -316,18 +335,23 @@ function KpiRow({ apps, theme }: { apps: Application[]; theme: ChartTheme }) {
           ),
         }}
       />
-      <KpiTile
-        label="Avg response"
-        value={avgResponse === null ? '—' : avgResponse.toFixed(1)}
-        unit={avgResponse === null ? '' : `days · n=${responses.length}`}
-        empty={avgResponse === null ? 'Not enough data yet' : undefined}
-      />
-      <KpiTile
-        label="Response spread"
-        value={responseStats === null ? '—' : responseStats.median.toFixed(1)}
-        unit={responseStats === null ? '' : `days median (p90 ${responseStats.p90.toFixed(1)})`}
-        empty={responseStats === null ? 'Not enough data yet' : undefined}
-      />
+      {/* Compact (Matcha) drops these two: the headline block above shows the same average, median and p90. */}
+      {!compact && (
+        <KpiTile
+          label="Avg response"
+          value={avgResponse === null ? '—' : avgResponse.toFixed(1)}
+          unit={avgResponse === null ? '' : `days · n=${responseN}`}
+          empty={avgResponse === null ? 'Not enough data yet' : undefined}
+        />
+      )}
+      {!compact && (
+        <KpiTile
+          label="Response spread"
+          value={responseStats === null ? '—' : responseStats.median.toFixed(1)}
+          unit={responseStats === null ? '' : `days median (p90 ${responseStats.p90.toFixed(1)})`}
+          empty={responseStats === null ? 'Not enough data yet' : undefined}
+        />
+      )}
       <KpiTile
         label="Gone quiet"
         value={String(ghosts.length)}
@@ -372,11 +396,13 @@ function ConversionBars<K extends string>({ rows, theme }: { rows: ConversionRow
     return <p className="py-6 text-center text-micro text-ink-soft">Not enough data yet.</p>;
   }
   return (
-    <ul ref={listRef} className="space-y-2.5">
+    <ul ref={listRef} className="space-y-2">
       {rows.map((r) => (
-        <li key={r.key} className="conv-row flex items-center gap-3">
-          <span className="w-28 shrink-0 truncate text-micro text-ink-soft">{r.label}</span>
-          <div className="h-2 flex-1 overflow-hidden rounded-full bg-line-soft">
+        <li key={r.key} className="conv-row flex items-center justify-between gap-2 min-w-0">
+          <span className="min-w-0 max-w-[44%] truncate text-micro text-ink-soft" title={r.label}>
+            {r.label}
+          </span>
+          <div className="h-1.5 flex-1 min-w-[24px] overflow-hidden rounded-full bg-line-soft">
             {r.replyRate !== null && (
               // Final width is set statically; scaleX (transform, composite-
               // only) does the growing — animating `width` directly forces a
@@ -388,7 +414,7 @@ function ConversionBars<K extends string>({ rows, theme }: { rows: ConversionRow
               />
             )}
           </div>
-          <span className="w-24 shrink-0 text-right text-micro tabular-nums text-ink-faint">
+          <span className="shrink-0 text-right text-micro tabular-nums text-ink-faint whitespace-nowrap">
             {r.replyRate === null ? `n=${r.n}` : `${Math.round(r.replyRate * 100)}% · n=${r.n}`}
           </span>
         </li>
@@ -400,6 +426,7 @@ function ConversionBars<K extends string>({ rows, theme }: { rows: ConversionRow
 export function AnalyticsView({ apps }: Props) {
   // Called before the early return — hooks must not run conditionally.
   const theme = useChartTheme();
+  const matcha = useMatcha();
 
   if (apps.length === 0) {
     return (
@@ -448,10 +475,23 @@ export function AnalyticsView({ apps }: Props) {
   });
 
   // Pipeline Conversion Funnel
-  const appliedCount = apps.filter((a) => a.status !== 'researching').length;
-  const respondedCount = apps.filter((a) => a.status === 'rejected' || a.status === 'interview' || a.status === 'offer').length;
-  const interviewCount = apps.filter((a) => a.status === 'interview' || a.status === 'offer').length;
-  const offerCount = apps.filter((a) => a.status === 'offer').length;
+  const submittedApps = apps.filter((a) => a.status !== 'researching');
+  const appliedCount = submittedApps.length;
+  const respondedApps = submittedApps.filter(hasReceivedResponse);
+  const respondedCount = respondedApps.length;
+  const noReplyApps = submittedApps.filter((a) => !hasReceivedResponse(a));
+  const noReplyCount = noReplyApps.length;
+  const interviewApps = submittedApps.filter(hasReachedInterview);
+  const interviewCount = interviewApps.length;
+  const offerApps = submittedApps.filter(
+    (a) => a.status === 'offer' || a.statusHistory?.some((h) => h.status === 'offer')
+  );
+  const offerCount = offerApps.length;
+
+  const { apps: ghostedList, thresholdDays } = ghostedApplications(apps);
+  const activeInterviews = interviewApps.filter((a) => a.status === 'interview').length;
+  const pastInterviews = interviewCount - activeInterviews;
+  const interviewCompanies = Array.from(new Set(interviewApps.map((a) => a.company))).join(', ');
 
   const funnelStages = [
     {
@@ -459,30 +499,45 @@ export function AnalyticsView({ apps }: Props) {
       count: appliedCount,
       rate: '100%',
       desc: 'All submitted roles',
+      tooltip: `${appliedCount} total roles submitted across all platforms`,
       fill: theme.accent,
     },
     {
       stage: '2. Response Received',
       count: respondedCount,
-      rate: `${appliedCount ? Math.round((respondedCount / appliedCount) * 100) : 0}%`,
-      desc: 'Decision or contact received',
+      rate: `${appliedCount ? ((respondedCount / appliedCount) * 100).toFixed(1) : 0}%`,
+      desc: 'Decision or contact',
+      tooltip: `${respondedCount} roles received contact (${apps.filter((a) => a.status === 'rejected').length} decisions, ${interviewCount} interview contacts)`,
       fill: theme.amber,
     },
     {
-      stage: '3. Interview Stage',
+      stage: '3. No Reply / Ghosted',
+      count: noReplyCount,
+      rate: `${appliedCount ? ((noReplyCount / appliedCount) * 100).toFixed(1) : 0}%`,
+      desc: `${ghostedList.length} quiet · ${noReplyCount - ghostedList.length} pending`,
+      tooltip: `${noReplyCount} listings with no reply (${ghostedList.length} past ${thresholdDays}d response threshold, ${noReplyCount - ghostedList.length} pending or closed)`,
+      fill: '#f43f5e',
+    },
+    {
+      stage: '4. Interview Stage',
       count: interviewCount,
       rate: `${appliedCount ? ((interviewCount / appliedCount) * 100).toFixed(1) : 0}%`,
-      desc: 'Advanced to interview',
+      desc: `${activeInterviews} active · ${pastInterviews} done`,
+      tooltip: `${interviewCount} roles reached interview: ${interviewCompanies}`,
       fill: '#8b5cf6',
     },
     {
-      stage: '4. Offer',
+      stage: '5. Offer',
       count: offerCount,
       rate: `${appliedCount ? ((offerCount / appliedCount) * 100).toFixed(1) : 0}%`,
       desc: 'Offer extended',
+      tooltip: `${offerCount} offers extended`,
       fill: theme.grass,
     },
   ];
+
+  const { avg: avgDays, n: avgN } = avgResponseDays(apps);
+  const spread = responseTimeStats(apps);
 
   // Weekly Momentum (Last 10 weeks)
   const now = Date.now();
@@ -514,7 +569,22 @@ export function AnalyticsView({ apps }: Props) {
 
   return (
     <div className="space-y-8">
-      <KpiRow apps={apps} theme={theme} />
+      {matcha ? (
+        <>
+          <MatchaInsightsHero
+            rows={funnelStages}
+            submitted={appliedCount}
+            responded={respondedCount}
+            avgDays={avgDays}
+            avgN={avgN}
+            medianDays={spread?.median ?? null}
+            p90Days={spread?.p90 ?? null}
+          />
+          <KpiRow apps={apps} theme={theme} compact />
+        </>
+      ) : (
+        <KpiRow apps={apps} theme={theme} />
+      )}
 
       <section>
         <header className="mb-4">
@@ -523,21 +593,21 @@ export function AnalyticsView({ apps }: Props) {
             Reply rate by group — hidden below n={3} so a single data point never reads as a trend.
           </p>
         </header>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <div className="panel p-5">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="panel p-4 sm:p-5 overflow-hidden">
             <h3 className="mb-3 section-label">By source</h3>
             <ConversionBars rows={sourceRows} theme={theme} />
           </div>
-          <div className="panel p-5">
+          <div className="panel p-4 sm:p-5 overflow-hidden">
             <h3 className="mb-3 section-label">By your own fit call</h3>
             <ConversionBars rows={fitRows} theme={theme} />
           </div>
-          <div className="panel p-5">
+          <div className="panel p-4 sm:p-5 overflow-hidden">
             <h3 className="mb-1 section-label">By ATS score</h3>
             <p className="mb-3 text-label text-ink-faint">Does the 80-point bar actually predict a reply?</p>
             <ConversionBars rows={atsRows} theme={theme} />
           </div>
-          <div className="panel p-5">
+          <div className="panel p-4 sm:p-5 overflow-hidden">
             <h3 className="mb-1 section-label">By apply delay</h3>
             <p className="mb-3 text-label text-ink-faint">Does rushing to beat a deadline cost anything?</p>
             <ConversionBars rows={delayRows} theme={theme} />
@@ -548,30 +618,33 @@ export function AnalyticsView({ apps }: Props) {
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
       <ActivityHeatmap apps={apps} theme={theme} />
 
+      {!matcha && (
       <ChartCard title="Pipeline conversion funnel">
-        <div className="mb-3 flex items-center justify-between text-micro text-ink-soft">
-          <span>Stage-by-stage progression from Applied to Offer</span>
-          <span className="font-mono text-label text-accent font-semibold">{appliedCount} Total Submitted</span>
+        <div className="mb-3 flex items-center justify-between gap-2 text-micro text-ink-soft">
+          <span className="truncate">Stage-by-stage progression from Applied to Offer</span>
+          <span className="shrink-0 font-mono text-label text-accent font-semibold">{appliedCount} Total Submitted</span>
         </div>
-        <div className="space-y-3 pt-1">
+        <div className="space-y-2.5 pt-0.5">
           {funnelStages.map((stage) => {
             const pct = appliedCount > 0 ? (stage.count / appliedCount) * 100 : 0;
             return (
-              <div key={stage.stage} className="space-y-1">
-                <div className="flex items-center justify-between text-meta font-medium">
-                  <span className="flex items-center gap-2 text-ink">
-                    <span className="h-2.5 w-2.5 rounded-full" style={{ background: stage.fill }} />
-                    <span>{stage.stage}</span>
-                    <span className="text-micro font-normal text-ink-faint hidden sm:inline">({stage.desc})</span>
-                  </span>
-                  <div className="flex items-center gap-2">
+              <div key={stage.stage} className="space-y-1 group" title={stage.tooltip || stage.desc}>
+                <div className="flex items-center justify-between gap-2 text-meta font-medium">
+                  <div className="flex min-w-0 items-center gap-2 text-ink">
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: stage.fill }} />
+                    <span className="shrink-0">{stage.stage}</span>
+                    <span className="hidden min-w-0 truncate text-micro font-normal text-ink-faint lg:inline">
+                      ({stage.desc})
+                    </span>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1.5">
                     <span className="font-mono font-bold text-ink tabular-nums">{stage.count}</span>
                     <span className="rounded border border-line bg-panel-2 px-1.5 py-0.5 text-micro font-mono font-semibold text-ink-soft">
                       {stage.rate}
                     </span>
                   </div>
                 </div>
-                <div className="h-3 w-full overflow-hidden rounded-full bg-panel-2 border border-line-soft">
+                <div className="h-2.5 w-full overflow-hidden rounded-full bg-panel-2 border border-line-soft">
                   <div
                     className="h-full rounded-full transition-all duration-700 ease-out"
                     style={{
@@ -585,6 +658,7 @@ export function AnalyticsView({ apps }: Props) {
           })}
         </div>
       </ChartCard>
+      )}
 
       <ChartCard title="Applications over time">
         {overTimeData.length < 1 ? (
@@ -592,8 +666,8 @@ export function AnalyticsView({ apps }: Props) {
             No applications logged yet.
           </div>
         ) : (
-          <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={overTimeData} margin={{ left: -20 }}>
+          <ResponsiveContainer width="100%" height={230}>
+            <LineChart data={overTimeData} margin={{ left: -20, right: 12, top: 4, bottom: 16 }}>
               <CartesianGrid strokeDasharray="3 3" stroke={theme.grid} vertical={false} />
               <XAxis
                 dataKey="month"
@@ -644,10 +718,10 @@ export function AnalyticsView({ apps }: Props) {
 
       <ChartCard title="Role type breakdown">
         <ResponsiveContainer width="100%" height={220}>
-          <BarChart data={typeData} layout="vertical" margin={{ left: 10 }}>
+          <BarChart data={typeData} layout="vertical" margin={{ left: 0, right: 16, top: 4, bottom: 4 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={theme.grid} horizontal={false} />
             <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: theme.axis }} />
-            <YAxis type="category" dataKey="label" width={110} tick={{ fontSize: 11, fill: theme.axis }} />
+            <YAxis type="category" dataKey="label" width={125} tick={{ fontSize: 11, fill: theme.axis }} />
             <Tooltip contentStyle={chartTooltipStyle(theme)} />
             <Bar
               dataKey="count"
@@ -668,7 +742,7 @@ export function AnalyticsView({ apps }: Props) {
           </div>
         ) : (
           <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={responseHistogram} margin={{ left: -20 }}>
+            <BarChart data={responseHistogram} margin={{ left: -20, right: 12, top: 4, bottom: 16 }}>
               <CartesianGrid strokeDasharray="3 3" stroke={theme.grid} vertical={false} />
               <XAxis dataKey="label" tick={{ fontSize: 11, fill: theme.axis }} />
               <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: theme.axis }} />
@@ -699,7 +773,7 @@ export function AnalyticsView({ apps }: Props) {
           )}
         </div>
         <ResponsiveContainer width="100%" height={220}>
-          <BarChart data={weeklyData} margin={{ left: -20, bottom: 4 }}>
+          <BarChart data={weeklyData} margin={{ left: -20, right: 12, top: 4, bottom: 16 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={theme.grid} vertical={false} />
             <XAxis dataKey="week" tick={{ fontSize: 11, fill: theme.axis }} />
             <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: theme.axis }} />

@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { gsap, useGSAP, prefersReducedMotion } from '../lib/gsapSetup';
 import { Icon } from './Icons';
 import { isOutreachView, VIEW_KIND, KIND_META, type OutreachEntry, type View } from '../types';
+import { scrollToTop } from '../lib/lenis';
 
 interface Props {
   view: View;
@@ -22,7 +23,7 @@ interface Props {
  * always said, so no existing view can regress from this being made
  * section-aware — only the two outreach sections branch.
  */
-function heroFor(view: View, appCount: number, outreach: OutreachEntry[]) {
+export function heroFor(view: View, appCount: number, outreach: OutreachEntry[]) {
   if (isOutreachView(view)) {
     const kind = VIEW_KIND[view];
     const meta = KIND_META[kind];
@@ -51,6 +52,27 @@ function heroFor(view: View, appCount: number, outreach: OutreachEntry[]) {
   };
 }
 
+/** Click handler for every "go to the dashboard" link in a page header: same view transition, scroll and onHome call in both header layouts. */
+export function useGoHome(onHome?: () => void) {
+  const navigate = useNavigate();
+  return (e?: React.MouseEvent) => {
+    if (e) e.preventDefault();
+    const go = () => {
+      if (onHome) {
+        onHome();
+      } else {
+        navigate('/');
+      }
+      scrollToTop();
+    };
+    if (typeof document !== 'undefined' && 'startViewTransition' in document) {
+      (document as any).startViewTransition(go);
+    } else {
+      go();
+    }
+  };
+}
+
 export function PageHeader({
   view,
   appCount,
@@ -63,29 +85,13 @@ export function PageHeader({
   sidebarCollapsed,
   onToggleSidebar,
 }: Props) {
-  const navigate = useNavigate();
   const hero = heroFor(view, appCount, outreach);
   const markRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
   const badgeRef = useRef<HTMLSpanElement>(null);
   const prevTitle = useRef(hero.title);
 
-  const handleHomeClick = (e?: React.MouseEvent) => {
-    if (e) e.preventDefault();
-    const go = () => {
-      if (onHome) {
-        onHome();
-      } else {
-        navigate('/');
-      }
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    };
-    if (typeof document !== 'undefined' && 'startViewTransition' in document) {
-      (document as any).startViewTransition(go);
-    } else {
-      go();
-    }
-  };
+  const handleHomeClick = useGoHome(onHome);
 
   // Mount-only assembly of the three brand shapes, staggered — run once per
   // page load, never looped (DESIGN.md: a brand loop on a tool opened dozens

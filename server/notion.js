@@ -63,7 +63,10 @@ function loadEnv() {
 
 const env = loadEnv();
 const TOKEN = env.NOTION_TOKEN || process.env.NOTION_TOKEN || '';
-const DATA_SOURCE_ID = env.NOTION_DATA_SOURCE_ID || process.env.NOTION_DATA_SOURCE_ID || '';
+const DATA_SOURCE_ID =
+  env.NOTION_DATA_SOURCE_ID ||
+  process.env.NOTION_DATA_SOURCE_ID ||
+  'a2baefc0-4c98-4014-88b3-581ccae744b6';
 
 export const notionEnabled = Boolean(TOKEN);
 

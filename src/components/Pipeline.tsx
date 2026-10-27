@@ -2,7 +2,7 @@ import { Icon } from './Icons';
 import { TabStrip } from './TabStrip';
 import type { Application } from '../types';
 
-const TABS: {
+export const TABS: {
   key: string;
   label: string;
   icon: (p: { className?: string }) => JSX.Element;
@@ -24,6 +24,7 @@ const TABS: {
   },
   { key: 'rejected', label: 'Rejected', icon: Icon.Close, matches: (a) => a.status === 'rejected' },
   { key: 'withdrawn', label: 'Withdrawn', icon: Icon.Withdrawn, matches: (a) => a.status === 'withdrawn' },
+  { key: 'skipped', label: 'Skipped', icon: Icon.Skipped, matches: (a) => a.status === 'skipped' },
 ];
 
 /**
@@ -33,9 +34,10 @@ const TABS: {
  * covers any entry with a positive, non-rejection signal past a bare
  * "applied" — Interview/Offer status, or `progressing: true` set by Claude
  * when a reply moves things forward (e.g. psychometric testing) without yet
- * justifying a formal status change. Withdrawn covers roles skipped or
- * pulled for fit/eligibility reasons — its own tab keeps them out of the
- * active tabs while staying reachable and filterable per-column in Board view.
+ * justifying a formal status change. Withdrawn covers a pulled application;
+ * Skipped is a role declined before ever applying (e.g. a Telegram triage
+ * pass) — each has its own tab so neither clutters the active ones while
+ * staying reachable and filterable per-column in Board view.
  */
 export function Pipeline({
   apps,

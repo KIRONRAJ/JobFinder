@@ -64,6 +64,9 @@ export const ACTION_LABELS = {
 
 export const IGNORED_ACTIONS = new Set([
   'event-completed',
+  // the review loop sends its own report and question messages
+  'auto-review',
+  'review-fact',
 ]);
 
 export function formatMessage(event) {
@@ -131,17 +134,35 @@ export function splitForTelegram(text, limit = TELEGRAM_CHUNK) {
  * chunking helper and worked. One guard in the shared sender means a new
  * command can't reintroduce it.
  */
-export async function sendTelegram(text, { token, chatId, replyMarkup, fetchImpl } = {}) {
-  if (!token || !chatId) return;
+export async function sendTelegram(text, { token, chatId, replyMarkup, fetchImpl, maxRetries = 3 } = {}) {
+  if (!token || !chatId) return { ok: false, error: 'missing parameters' };
   const chunks = splitForTelegram(String(text ?? ''));
   for (let i = 0; i < chunks.length; i++) {
     const params = { chat_id: chatId, text: chunks[i] };
     // Keyboard goes on the final chunk only, so it lands under the last
     // message rather than being repeated between fragments.
     if (replyMarkup && i === chunks.length - 1) params.reply_markup = replyMarkup;
-    // eslint-disable-next-line no-await-in-loop -- fragments must arrive in order
-    await telegramApi('sendMessage', params, { token, fetchImpl, label: 'notify' });
+    
+    let sent = false;
+    let lastErr = null;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      // eslint-disable-next-line no-await-in-loop -- fragments must arrive in order
+      const res = await telegramApi('sendMessage', params, { token, fetchImpl, label: 'notify' });
+      if (res && res.ok) {
+        sent = true;
+        break;
+      }
+      lastErr = res?.description || 'failed to send message';
+      if (attempt < maxRetries) {
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((r) => setTimeout(r, 1000 * attempt));
+      }
+    }
+    if (!sent) {
+      return { ok: false, error: lastErr };
+    }
   }
+  return { ok: true };
 }
 
 export async function sendTelegramDocument(
@@ -155,6 +176,28 @@ export async function sendTelegramDocument(
     { token, fetchImpl, label: 'sendDocument' }
   );
   return body.ok ? { ok: true, result: body.result } : { ok: false, error: body.description };
+}
+
+export async function sendTelegramVoice(
+  filePath,
+  { caption = '', token, chatId, fetchImpl, maxRetries = 3 } = {}
+) {
+  if (!token || !chatId || !filePath) return { ok: false, error: 'missing parameters' };
+  let lastErr = null;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const body = await telegramUpload(
+      'sendVoice',
+      { filePath, field: 'voice', fields: { chat_id: chatId, caption } },
+      { token, fetchImpl, label: 'sendVoice' }
+    );
+    if (body.ok) return { ok: true, result: body.result };
+    lastErr = body.description || 'failed to upload voice';
+    if (attempt < maxRetries) {
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((r) => setTimeout(r, 1000 * attempt));
+    }
+  }
+  return { ok: false, error: lastErr };
 }
 
 export async function sendTelegramQuiz(
@@ -199,13 +242,47 @@ export async function findCvDocument(matchKey, entryId, { careerDir = CAREER_DIR
 
     const dir = path.join(careerDir, entry.folderPath);
     const files = await fsPromises.readdir(dir);
+    const isCv = (f) => {
+      const lower = f.toLowerCase();
+      return lower.includes('cv') || (!lower.includes('cover') && !lower.includes('letter') && !lower.includes('cl -') && !lower.startsWith('cl_'));
+    };
     // Prefer PDF CV first
     const pdf = files.find((f) => f.toLowerCase().endsWith('.pdf') && f.toLowerCase().includes('cv'));
     if (pdf) return { path: path.join(dir, pdf), entry, fileName: pdf };
-    const anyPdf = files.find((f) => f.toLowerCase().endsWith('.pdf'));
-    if (anyPdf) return { path: path.join(dir, anyPdf), entry, fileName: anyPdf };
     const docx = files.find((f) => f.toLowerCase().endsWith('.docx') && f.toLowerCase().includes('cv'));
     if (docx) return { path: path.join(dir, docx), entry, fileName: docx };
+    const anyCvPdf = files.find((f) => f.toLowerCase().endsWith('.pdf') && isCv(f));
+    if (anyCvPdf) return { path: path.join(dir, anyCvPdf), entry, fileName: anyCvPdf };
+    const anyCvDocx = files.find((f) => f.toLowerCase().endsWith('.docx') && isCv(f));
+    if (anyCvDocx) return { path: path.join(dir, anyCvDocx), entry, fileName: anyCvDocx };
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+export async function findCoverLetterDocument(matchKey, entryId, { careerDir = CAREER_DIR, dataFile = DEFAULT_DATA_FILE } = {}) {
+  try {
+    const raw = await fsPromises.readFile(dataFile, 'utf8');
+    const apps = JSON.parse(raw);
+    const entry = apps.find((a) => (matchKey && a.matchKey === matchKey) || (entryId && a.id === entryId));
+    if (!entry || !entry.folderPath) return null;
+
+    const dir = path.join(careerDir, entry.folderPath);
+    const files = await fsPromises.readdir(dir);
+    const isCl = (f) => {
+      const lower = f.toLowerCase();
+      return lower.includes('cover') || lower.includes('letter') || lower.includes('cl -') || lower.startsWith('cl_');
+    };
+    // Prefer PDF Cover Letter first
+    const pdf = files.find((f) => f.toLowerCase().endsWith('.pdf') && isCl(f));
+    if (pdf) return { path: path.join(dir, pdf), entry, fileName: pdf };
+    // Fall back to DOCX Cover Letter
+    const docx = files.find((f) => f.toLowerCase().endsWith('.docx') && isCl(f));
+    if (docx) return { path: path.join(dir, docx), entry, fileName: docx };
+    // Fall back to TXT/MD Cover Letter
+    const txt = files.find((f) => (f.toLowerCase().endsWith('.txt') || f.toLowerCase().endsWith('.md')) && isCl(f));
+    if (txt) return { path: path.join(dir, txt), entry, fileName: txt };
   } catch {
     return null;
   }
@@ -313,6 +390,25 @@ export async function sendEvents(events, { token, chatId, fetchImpl, careerDir =
               ],
             ],
           };
+        } else if (event.action === 'cv-generated') {
+          replyMarkup = {
+            inline_keyboard: [
+              [
+                { text: '📄 Get CV PDF', callback_data: `get_cv:${ref}` },
+                { text: '📝 Cover Letter', callback_data: `get_cl:${ref}` },
+              ],
+              [{ text: '🔍 Review', callback_data: `review:${ref}` }],
+            ],
+          };
+        } else if (event.action === 'status') {
+          replyMarkup = {
+            inline_keyboard: [
+              [
+                { text: '🔍 View Role Card', callback_data: `view_role:${ref}` },
+                { text: '🎤 Prep Notes', callback_data: `prep:${ref}` },
+              ],
+            ],
+          };
         } else if (event.action === 'follow-up') {
           replyMarkup = {
             inline_keyboard: [
@@ -346,12 +442,23 @@ export async function sendEvents(events, { token, chatId, fetchImpl, careerDir =
         try {
           const doc = await findCvDocument(event.matchKey, event.entryId, { careerDir, dataFile });
           if (doc && doc.path) {
-            const caption = `📄 Tailored Document: ${doc.entry.company} — ${doc.entry.role}`;
+            const caption = `📄 Tailored CV: ${doc.entry.company} — ${doc.entry.role}`;
             // eslint-disable-next-line no-await-in-loop
             await sendTelegramDocument(doc.path, { caption, token, chatId, fetchImpl });
           }
         } catch (err) {
-          console.error('telegram notify: failed to send generated document:', err.message);
+          console.error('telegram notify: failed to send generated CV:', err.message);
+        }
+
+        try {
+          const clDoc = await findCoverLetterDocument(event.matchKey, event.entryId, { careerDir, dataFile });
+          if (clDoc && clDoc.path) {
+            const caption = `📝 Tailored Cover Letter: ${clDoc.entry.company} — ${clDoc.entry.role}`;
+            // eslint-disable-next-line no-await-in-loop
+            await sendTelegramDocument(clDoc.path, { caption, token, chatId, fetchImpl });
+          }
+        } catch (err) {
+          console.error('telegram notify: failed to send generated cover letter:', err.message);
         }
       }
     } catch (err) {

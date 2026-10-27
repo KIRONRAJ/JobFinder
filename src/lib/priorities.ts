@@ -34,11 +34,15 @@ function estimateReadiness(entry: Application): number {
  * `pickPriorities()`, ported here so the homepage's "needs attention" strip
  * never has to be empty. This is a **display-only** computation: unlike the
  * server function, it never writes `priority` back onto an entry. Hitting
- * "Auto-pick" in the UI still calls the real endpoint if Jordan wants these
+ * "Auto-pick" in the UI still calls the real endpoint if Kironraj wants these
  * persisted (visible elsewhere, e.g. the Agenda) — this just means the
  * homepage doesn't need that click to stop being an empty prompt box.
  */
 export function pickPriorities(list: Application[]): PriorityPick[] {
+  return topPerEntry(priorityCandidates(list), 3);
+}
+
+function priorityCandidates(list: Application[]): PriorityPick[] {
   const now = Date.now();
   const candidates: PriorityPick[] = [];
 
@@ -117,13 +121,100 @@ export function pickPriorities(list: Application[]): PriorityPick[] {
     }
   }
 
-  const byId = new Map<string, PriorityPick>();
+  return candidates;
+}
+
+function topPerEntry<T extends { id: string; score: number }>(candidates: T[], n: number): T[] {
+  const byId = new Map<string, T>();
   for (const c of candidates) {
     const prev = byId.get(c.id);
     if (!prev || c.score > prev.score) byId.set(c.id, c);
   }
-
   return Array.from(byId.values())
     .sort((x, y) => y.score - x.score)
-    .slice(0, 3);
+    .slice(0, n);
+}
+
+export type TodayActionKind = PriorityPick['action'] | 'paste-ad' | 'create-cv' | 'requirements' | 'task';
+
+export interface TodayAction {
+  id: string;
+  score: number;
+  reason: string;
+  action: TodayActionKind;
+  taskId?: string;
+}
+
+const WANTS_TO_APPLY = new Set(['strong-apply', 'apply']);
+
+function closesIn(d: number | null): string {
+  return d === null ? '' : d === 0 ? ' · closes today' : ` · closes in ${d}d`;
+}
+
+/**
+ * The homepage's "Today" column: Claude-set priorities, the deterministic rules above, plus the
+ * concrete next step for roles still being worked up — missing ad text, no CV
+ * yet, unmet submission extras, and tasks falling due. Display-only.
+ */
+export function todayActions(list: Application[], n = 3): TodayAction[] {
+  const out: TodayAction[] = [...priorityCandidates(list)];
+  const now = Date.now();
+
+  for (const a of list) {
+    // A pick Claude made with judgement outranks every rule-based one.
+    if (a.priority && (!a.priority.expiresAt || a.priority.expiresAt > now)) {
+      out.push({ id: a.id, score: 990 - (a.priority.rank ?? 3) * 5, reason: a.priority.reason, action: a.priority.action });
+    }
+    const isTerminal = a.status === 'rejected' || a.status === 'withdrawn' || a.status === 'skipped';
+    for (const t of isTerminal ? [] : a.tasks ?? []) {
+      if (t.completedAt || !t.label) continue;
+      const hours = (new Date(t.dueAt).getTime() - now) / 3_600_000;
+      if (Number.isFinite(hours) && hours <= 48) {
+        out.push({
+          id: a.id,
+          score: 960 - Math.max(hours, -48),
+          reason: `${t.label}${hours < 0 ? ' · overdue' : hours < 24 ? ' · due today' : ' · due tomorrow'}`,
+          action: 'task',
+          taskId: t.id,
+        });
+      }
+    }
+
+    if (a.status !== 'researching') continue;
+    const d = a.deadline ? daysUntil(a.deadline) : null;
+    if (d !== null && d < 0) continue;
+    const soon = d !== null && d <= 14;
+    const verdict = a.analysis?.recommendation?.verdict;
+    const keen = verdict ? WANTS_TO_APPLY.has(verdict) || (verdict === 'borderline' && soon) : soon;
+    if (!keen) continue;
+    const urgency = soon ? (14 - d!) * 8 : 0;
+    const hasCv = a.cvStatus === 'drafted' || a.cvStatus === 'sent' || a.cvStatus === 'queued';
+
+    if (!a.jobText?.trim() || a.jobTextKind === 'summary') {
+      out.push({
+        id: a.id,
+        score: 600 + urgency,
+        reason: `${a.jobTextKind === 'summary' ? 'Ad text is a summary' : 'No ad text saved'}, paste the real ad${closesIn(d)}`,
+        action: 'paste-ad',
+      });
+    } else if (!hasCv) {
+      out.push({
+        id: a.id,
+        score: 560 + urgency + (verdict === 'strong-apply' ? 30 : 0),
+        reason: `${verdict === 'strong-apply' ? 'Strong fit' : 'Worth applying'}, no CV yet${closesIn(d)}`,
+        action: 'create-cv',
+      });
+    } else if (a.analysis?.submissionRequirements?.some((r) => !r.done)) {
+      out.push({
+        id: a.id,
+        score: 620 + urgency,
+        reason: `CV ready, but the ad also wants: ${a.analysis.submissionRequirements.find((r) => !r.done)!.label}`,
+        action: 'requirements',
+      });
+    } else if (a.cvStatus === 'drafted') {
+      out.push({ id: a.id, score: 580 + urgency, reason: `CV drafted, ready to submit${closesIn(d)}`, action: 'apply' });
+    }
+  }
+
+  return topPerEntry(out, n);
 }

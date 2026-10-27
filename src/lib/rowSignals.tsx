@@ -15,7 +15,7 @@ export interface RowSignal {
 
 /** A closed-out entry doesn't owe anything further, regardless of what its
  *  deadline/follow-up fields still say — same rule DeadlineTag already uses. */
-const CLOSED_STATUSES: Application['status'][] = ['rejected', 'withdrawn', 'offer'];
+const CLOSED_STATUSES: Application['status'][] = ['rejected', 'withdrawn', 'skipped', 'offer'];
 
 /**
  * Ranks what's actually owing on a role, so the row can show the 3 things

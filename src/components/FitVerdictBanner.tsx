@@ -5,7 +5,7 @@ import type { Analysis } from '../types';
 
 type Verdict = NonNullable<Analysis['recommendation']>['verdict'];
 
-const VERDICT_META: Record<
+export const VERDICT_META: Record<
   Verdict,
   {
     label: string;
@@ -93,7 +93,7 @@ export function FitVerdictBanner({
    *  outside this app's own list is lost. */
   onDeleteLocal: () => void;
   deleteLocalBusy: boolean;
-  /** Jordan's own corrections to this verdict — see Application.userFacts.
+  /** Kironraj's own corrections to this verdict — see Application.userFacts.
    *  The verdict is Claude reading an ad; this is the candidate reading it
    *  back. A wrong "skip" used to be a dead end: the only two actions were
    *  accept it or drop the role, with nowhere to say "I *am* eligible, here's

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { gsap, prefersReducedMotion } from '../lib/gsapSetup';
 import { useFlipPill } from '../lib/useFlipPill';
 import { Icon } from './Icons';
+import { useMatcha } from '../lib/useMatcha';
 
 /**
  * Icon-swap toggles (dark/light, Bauhaus/Pulse): rotate the current icon out,
@@ -58,6 +59,7 @@ export const VIEW_META: {
   { key: 'agenda', path: '/agenda', label: 'Agenda', group: 'Pipeline', icon: Icon.Calendar, emoji: '🗓️' },
   { key: 'study', path: '/study', label: 'Study', group: 'Pipeline', icon: Icon.GradCap, emoji: '🎓' },
   { key: 'insights', path: '/insights', label: 'Insights', group: 'Pipeline', icon: Icon.Chart, emoji: '📊' },
+  { key: 'radar', path: '/radar', label: 'Radar', group: 'Pipeline', icon: Icon.Target, emoji: '🛰️' },
   { key: 'companies', path: '/companies', label: 'Direct approach', group: 'Outreach', icon: Icon.Building, emoji: '🏢' },
   { key: 'recruiters', path: '/recruiters', label: 'Recruiters', group: 'Outreach', icon: Icon.Handshake, emoji: '🤝' },
   { key: 'settings', path: '/settings', label: 'Settings', group: 'System', icon: Icon.Cog, emoji: '⚙️' },
@@ -128,6 +130,7 @@ export function Sidebar({
   collapsed = false,
   onToggleCollapse,
 }: SidebarProps) {
+  const matcha = useMatcha();
   const navRef = useRef<HTMLUListElement>(null);
   const navPillRef = useRef<HTMLSpanElement>(null);
   useFlipPill(view, navRef, navPillRef);
@@ -140,6 +143,7 @@ export function Sidebar({
     // page instead of scrolling inside itself. The rail is hidden below md —
     // MobileNav's bottom bar + "More" sheet own navigation on small screens.
     <aside
+      data-collapsed={mode === 'rail' ? String(collapsed) : undefined}
       className={
         mode === 'rail'
           ? `hidden min-w-0 md:sticky md:top-[72px] md:block md:max-h-[calc(100vh-72px)] md:overflow-y-auto md:py-2 transition-all duration-200 ${
@@ -148,6 +152,17 @@ export function Sidebar({
           : 'min-w-0'
       }
     >
+      {matcha && mode === 'rail' && collapsed && (
+        <button
+          type="button"
+          onClick={() => onSetView('list')}
+          title="Job Search HQ"
+          aria-label="Job Search HQ — Dashboard"
+          className="mx-rail-logo hidden md:flex"
+        >
+          J
+        </button>
+      )}
       {mode === 'rail' && onToggleCollapse && (
         <div
           className={`hidden md:flex items-center ${
@@ -205,6 +220,7 @@ export function Sidebar({
                           aria-current={active ? 'page' : undefined}
                           title={collapsed ? label : undefined}
                           aria-label={label}
+                          string="magnetic"
                           className={`group/nav relative flex items-center transition duration-150
                                       focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-accent/30
                                       ${
@@ -224,7 +240,7 @@ export function Sidebar({
                               active, where the label is fully visible and
                               carrying the meaning; every inactive item keeps
                               the consistent SVG. */}
-                          {active ? (
+                          {active && !matcha ? (
                             <NavEmoji emoji={emoji} />
                           ) : (
                             <IconEl className="h-4 w-4 shrink-0 transition-transform duration-200 group-hover/nav:scale-110" />
@@ -292,7 +308,11 @@ export function Sidebar({
           </div>
           {onSetTagF && (
             <div className="relative">
-              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs">🏷️</span>
+              {matcha ? (
+                <Icon.Note className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-faint" />
+              ) : (
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs">🏷️</span>
+              )}
               <select
                 value={tagF ?? ''}
                 onChange={(e) => onSetTagF(e.target.value)}
@@ -300,7 +320,8 @@ export function Sidebar({
                 aria-label="Filter by tag"
               >
                 <option value="">All tags</option>
-                <option value="SOT">🕊️ Summer of Tech (SOT)</option>
+                <option value="SOT">{matcha ? 'Summer of Tech (SOT)' : '🕊️ Summer of Tech (SOT)'}</option>
+                <option value="Reapplied">Reapplied</option>
                 <option value="Internship">Internship</option>
                 <option value="Graduate">Graduate</option>
                 <option value="Cyber">Cyber</option>
@@ -334,12 +355,14 @@ export function Sidebar({
           {!collapsed && (
             <>
               {dark ? 'Light mode' : 'Dark mode'}
-              <span
-                aria-hidden="true"
-                className="emoji ml-auto text-[13px] opacity-0 transition-opacity group-hover/appearance:opacity-100"
-              >
-                {dark ? '☀️' : '🌙'}
-              </span>
+              {!matcha && (
+                <span
+                  aria-hidden="true"
+                  className="emoji ml-auto text-[13px] opacity-0 transition-opacity group-hover/appearance:opacity-100"
+                >
+                  {dark ? '☀️' : '🌙'}
+                </span>
+              )}
             </>
           )}
         </button>
@@ -359,12 +382,14 @@ export function Sidebar({
           {!collapsed && (
             <>
               Theme, photo &amp; sound
-              <span
-                aria-hidden="true"
-                className="emoji ml-auto text-[13px] opacity-0 transition-opacity group-hover/settings:opacity-100"
-              >
-                ⚙️
-              </span>
+              {!matcha && (
+                <span
+                  aria-hidden="true"
+                  className="emoji ml-auto text-[13px] opacity-0 transition-opacity group-hover/settings:opacity-100"
+                >
+                  ⚙️
+                </span>
+              )}
             </>
           )}
         </button>

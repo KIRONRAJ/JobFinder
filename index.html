@@ -5,6 +5,25 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Job Search HQ</title>
     <script>
+      // Telegram's SDK is only needed inside the Mini App. Loading it for every
+      // visit blocked first paint on telegram.org, so inject it (async) only
+      // when launched from Telegram. Same signals App.tsx uses for isMiniApp.
+      (function () {
+        var h = location.hash + location.search;
+        if (location.pathname.indexOf("/miniapp") !== 0 && h.indexOf("tgWebAppData") === -1) return;
+        var s = document.createElement("script");
+        s.src = "https://telegram.org/js/telegram-web-app.js";
+        s.async = true;
+        s.onload = function () {
+          try {
+            window.Telegram.WebApp.ready();
+            window.Telegram.WebApp.expand();
+          } catch (e) {}
+        };
+        document.head.appendChild(s);
+      })();
+    </script>
+    <script>
       // Daily-rotating favicon: same emoji all day, changes at local midnight.
       (function () {
         var EMOJIS = ["💼", "🎯", "📌", "🚀", "🔍", "🧭", "📈", "🏆", "✅", "🗂️", "📋", "🔑"];
@@ -31,9 +50,53 @@
           var isDark = savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches);
           if (isDark) document.documentElement.classList.add('dark');
           var visualTheme = localStorage.getItem('visual_theme');
+          // Same rule as App.tsx: a saved bauhaus/cyber needs no attribute here, pulse is set, anything else is the default (matcha).
           if (visualTheme === 'pulse') document.documentElement.setAttribute('data-theme', 'pulse');
+          else if (visualTheme !== 'bauhaus' && visualTheme !== 'cyber') document.documentElement.setAttribute('data-theme', 'matcha');
         } catch (e) {}
       })();
+    </script>
+    <script>
+      // Global error listener to visibly display any startup errors on screen
+      window.addEventListener('error', function (e) {
+        var el = document.getElementById('app-splash');
+        if (el) {
+          var div = document.getElementById('splash-error-box');
+          if (!div) {
+            div = document.createElement('div');
+            div.id = 'splash-error-box';
+            div.style.cssText = 'color:#ff5555;font-size:12px;padding:12px;max-width:90%;word-break:break-all;text-align:center;margin-top:16px;background:rgba(0,0,0,0.6);border-radius:8px;font-family:monospace;';
+            el.appendChild(div);
+          }
+          div.textContent = '❌ Script Error: ' + (e.message || e.error || 'Unknown script error');
+        }
+      });
+      window.addEventListener('unhandledrejection', function (e) {
+        var el = document.getElementById('app-splash');
+        if (el) {
+          var div = document.getElementById('splash-error-box');
+          if (!div) {
+            div = document.createElement('div');
+            div.id = 'splash-error-box';
+            div.style.cssText = 'color:#ff5555;font-size:12px;padding:12px;max-width:90%;word-break:break-all;text-align:center;margin-top:16px;background:rgba(0,0,0,0.6);border-radius:8px;font-family:monospace;';
+            el.appendChild(div);
+          }
+          div.textContent = '❌ Promise Error: ' + (e.reason?.message || e.reason || 'Unhandled rejection');
+        }
+      });
+      setTimeout(function () {
+        var splash = document.getElementById('app-splash');
+        if (splash && !document.getElementById('splash-reload-btn')) {
+          var btn = document.createElement('button');
+          btn.id = 'splash-reload-btn';
+          btn.style.cssText = 'margin-top:20px;padding:8px 16px;border-radius:8px;background:#d02020;color:#fff;border:none;font-size:12px;font-weight:bold;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.3);';
+          btn.textContent = '🔄 Reload App';
+          btn.onclick = function () {
+            window.location.reload();
+          };
+          splash.appendChild(btn);
+        }
+      }, 4000);
     </script>
   </head>
   <body>
@@ -61,6 +124,14 @@
           .dark[data-theme="pulse"] #app-splash {
             background-color: #120f1d;
             color: #f4f1fc;
+          }
+          [data-theme="matcha"] #app-splash {
+            background-color: #f6f4ec;
+            color: #16190f;
+          }
+          .dark[data-theme="matcha"] #app-splash {
+            background-color: #0d0f0b;
+            color: #eceae0;
           }
           .splash-mark {
             display: flex;
@@ -102,6 +173,9 @@
             align-items: center;
             gap: 6px;
           }
+          [data-theme="matcha"] .splash-title span {
+            display: none;
+          }
           .splash-progress {
             margin-top: 18px;
             width: 140px;
@@ -123,6 +197,12 @@
           }
           [data-theme="pulse"] .splash-bar {
             background: linear-gradient(90deg, #6d3cff, #ff3d94);
+          }
+          [data-theme="matcha"] .splash-bar {
+            background: #3f6b00;
+          }
+          .dark[data-theme="matcha"] .splash-bar {
+            background: #c6f04d;
           }
           @keyframes splashSlide {
             0% { left: -40%; width: 30%; }

@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 // Self-hosted: this is an offline-first local tool, so first paint must not
 // depend on fonts.googleapis.com being reachable.
 import '@fontsource-variable/outfit';
+import '@fontsource-variable/instrument-sans/wght.css';
 import '@fontsource/jetbrains-mono/400.css';
 import '@fontsource/jetbrains-mono/500.css';
 // Registers GSAP's plugins once, app-wide, before any component mounts —
@@ -11,6 +12,8 @@ import '@fontsource/jetbrains-mono/500.css';
 // that used to sit here — each animation site now checks
 // prefersReducedMotion() (also from gsapSetup.ts) itself.
 import './lib/gsapSetup';
+import './lib/stringTune';
+import './lib/lenis';
 import App from './App';
 import './index.css';
 

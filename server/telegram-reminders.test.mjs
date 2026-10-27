@@ -22,7 +22,7 @@ test('formatEventReminderMessage creates appropriate text for day, 1h, and 10m',
     end: '2026-09-17T19:00:00+12:00',
     location: 'Online Livestream',
     url: 'https://example.com/sot',
-    notes: 'Meet Acme Corp and Example Industries',
+    notes: 'Meet Acme Keys and Example Labs',
   };
 
   const dayMsg = formatEventReminderMessage(event, 'day');
@@ -181,7 +181,7 @@ test('checkEventReminders auto-closes event after end time without audit spam', 
 test('checkEventReminders never auto-closes or spams for past application tasks', async () => {
   const app = {
     id: 'app_cyclone',
-    company: 'Cyclone',
+    company: 'Example Co',
     status: 'interview',
     tasks: [
       {

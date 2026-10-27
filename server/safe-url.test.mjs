@@ -1,6 +1,5 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import os from 'node:os';
 import { assertFetchableUrl, isFetchableUrl } from './safe-url.js';
 
 test('safe-url: allows ordinary public job-ad links', () => {
@@ -18,7 +17,7 @@ test('safe-url: blocks loopback and local names', () => {
     'http://127.0.0.1:5178/api/applications',
     'http://localhost:5178/',
     'http://[::1]:5178/',
-    `http://${os.hostname()}:5178/`,
+    'http://homeserver:5178/',
     'http://printer.local/',
   ]) {
     assert.equal(isFetchableUrl(u), false, `${u} should be blocked`);
@@ -29,7 +28,7 @@ test('safe-url: blocks loopback and local names', () => {
 // this server and must not be proxyable through a job-ad URL.
 test('safe-url: blocks the Tailscale CGNAT range and RFC1918', () => {
   for (const u of [
-    'http://100.100.100.100:5178/',
+    'http://100.64.0.2:5178/',
     'http://100.64.0.1/',
     'http://100.127.255.254/',
     'http://10.0.0.5/',
@@ -64,4 +63,38 @@ test('safe-url: rejects non-http schemes and junk', () => {
 test('safe-url: assert form explains why', () => {
   assert.throws(() => assertFetchableUrl('http://10.0.0.1/'), /private address/);
   assert.throws(() => assertFetchableUrl('file:///etc/passwd'), /non-http/);
+});
+
+// ---- redirect-safe curl output ----------------------------------------------
+import { guardCurlOutput, SAFE_CURL_ARGS } from './safe-url.js';
+import http from 'node:http';
+import { execFile } from 'node:child_process';
+
+test('guardCurlOutput: passes public results through and strips the trailer', () => {
+  assert.equal(guardCurlOutput('<html>ad</html>\n__JOBHQ_FINAL__https://example.com/job 93.184.216.34'), '<html>ad</html>');
+});
+
+test('guardCurlOutput: drops output when the final URL or peer is not public', () => {
+  assert.equal(guardCurlOutput('secret\n__JOBHQ_FINAL__http://127.0.0.1:5178/api 127.0.0.1'), '');
+  assert.equal(guardCurlOutput('secret\n__JOBHQ_FINAL__https://example.com/x 100.64.0.2'), '');
+  assert.equal(guardCurlOutput('secret\n__JOBHQ_FINAL__file:///etc/passwd '), '');
+});
+
+test('guardCurlOutput: a bare string (no trailer) is returned unchanged', () => {
+  assert.equal(guardCurlOutput('plain html'), 'plain html');
+});
+
+test('SAFE_CURL_ARGS: real curl reports a loopback landing so the body is discarded', async () => {
+  const server = http.createServer((_req, res) => res.end('INTERNAL'));
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address();
+  try {
+    const out = await new Promise((resolve, reject) =>
+      execFile('curl', [...SAFE_CURL_ARGS, `http://127.0.0.1:${port}/`], (err, stdout) => (err ? reject(err) : resolve(stdout)))
+    );
+    assert.ok(out.includes('INTERNAL'));
+    assert.equal(guardCurlOutput(out), '');
+  } finally {
+    server.close();
+  }
 });

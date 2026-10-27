@@ -11,6 +11,7 @@ import {
   InternshipTag,
   PriorityTag,
   StatusIcon,
+  STATUS_TEXT_COLOR,
   statusWash,
   TagBadge,
 } from './Badges';
@@ -18,6 +19,8 @@ import { CompanyAvatar } from './CompanyAvatar';
 import { ReadinessBar } from './ReadinessBar';
 import { computeReadiness } from '../lib/readiness';
 import { Icon } from './Icons';
+import { useMatcha } from '../lib/useMatcha';
+import { ShowMoreControl } from './ShowMoreControl';
 import { STATUSES, type Application, type Status } from '../types';
 
 interface Props {
@@ -25,11 +28,22 @@ interface Props {
   onOpen?: (app: Application) => void;
   onEdit?: (app: Application) => void;
   onStatusChange: (app: Application, status: Status) => void;
+  limit?: number;
+  onLimitChange?: (newLimit: number) => void;
 }
 
-export function BoardView({ apps, onOpen, onEdit, onStatusChange }: Props) {
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/** "11 Oct" from the entry's stored applied date (YYYY-MM-DD); nothing when there is no date. */
+function shortDate(date?: string): string | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(date ?? '');
+  return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]}` : null;
+}
+
+export function BoardView({ apps, onOpen, onEdit, onStatusChange, limit = 6, onLimitChange }: Props) {
   const [dragId, setDragId] = useState<string | null>(null);
   const [overCol, setOverCol] = useState<Status | null>(null);
+  const [droppedId, setDroppedId] = useState<string | null>(null);
+  const [colLimits, setColLimits] = useState<Partial<Record<Status, number>>>({});
   const [collapsedCols, setCollapsedCols] = useState<Record<string, boolean>>({
     rejected: true,
     withdrawn: true,
@@ -39,26 +53,64 @@ export function BoardView({ apps, onOpen, onEdit, onStatusChange }: Props) {
     setCollapsedCols((prev) => ({ ...prev, [statusKey]: !prev[statusKey] }));
   };
 
+  const handleShowMoreCol = (key: Status, currentLimit: number) => {
+    const next = currentLimit + 6;
+    setColLimits((prev) => ({ ...prev, [key]: next }));
+    onLimitChange?.(Math.max(limit, next));
+  };
+
+  const handleShowAllCol = (key: Status, total: number) => {
+    setColLimits((prev) => ({ ...prev, [key]: total }));
+  };
+
+  const handleShowFewerCol = (key: Status) => {
+    setColLimits((prev) => ({ ...prev, [key]: 6 }));
+  };
+
+  const handleDropOnCol = (targetStatus: Status, id: string) => {
+    const app = apps.find((a) => a.id === id);
+    if (app && app.status !== targetStatus) {
+      onStatusChange(app, targetStatus);
+      playSound('tick');
+      setDroppedId(id);
+      const targetCards = apps.filter((a) => a.status === targetStatus);
+      const currentLimit = colLimits[targetStatus] ?? limit;
+      if (targetCards.length >= currentLimit) {
+        setColLimits((prev) => ({ ...prev, [targetStatus]: currentLimit + 6 }));
+      }
+    }
+  };
+
   return (
     <div className="flex items-start gap-4 overflow-x-auto pb-4">
-      {STATUSES.map(({ key, label }) => (
-        <BoardColumn
-          key={key}
-          statusKey={key}
-          label={label}
-          apps={apps}
-          cards={apps.filter((a) => a.status === key)}
-          isOver={overCol === key}
-          dragId={dragId}
-          setDragId={setDragId}
-          setOverCol={setOverCol}
-          isCollapsed={Boolean(collapsedCols[key])}
-          onToggleCollapse={() => toggleCollapse(key)}
-          onOpen={onOpen}
-          onEdit={onEdit}
-          onStatusChange={onStatusChange}
-        />
-      ))}
+      {STATUSES.map(({ key, label }) => {
+        const cards = apps.filter((a) => a.status === key);
+        const colLimit = colLimits[key] ?? limit;
+        return (
+          <BoardColumn
+            key={key}
+            statusKey={key}
+            label={label}
+            apps={apps}
+            cards={cards}
+            colLimit={colLimit}
+            droppedId={droppedId}
+            onShowMore={() => handleShowMoreCol(key, colLimit)}
+            onShowAll={() => handleShowAllCol(key, cards.length)}
+            onShowFewer={() => handleShowFewerCol(key)}
+            isOver={overCol === key}
+            dragId={dragId}
+            setDragId={setDragId}
+            setOverCol={setOverCol}
+            isCollapsed={Boolean(collapsedCols[key])}
+            onToggleCollapse={() => toggleCollapse(key)}
+            onOpen={onOpen}
+            onEdit={onEdit}
+            onDropApp={(id) => handleDropOnCol(key, id)}
+            onStatusChange={onStatusChange}
+          />
+        );
+      })}
     </div>
   );
 }
@@ -72,6 +124,11 @@ function BoardColumn({
   label,
   apps,
   cards,
+  colLimit,
+  droppedId,
+  onShowMore,
+  onShowAll,
+  onShowFewer,
   isOver,
   dragId,
   setDragId,
@@ -80,12 +137,18 @@ function BoardColumn({
   onToggleCollapse,
   onOpen,
   onEdit,
+  onDropApp,
   onStatusChange,
 }: {
   statusKey: Status;
   label: string;
   apps: Application[];
   cards: Application[];
+  colLimit: number;
+  droppedId: string | null;
+  onShowMore: () => void;
+  onShowAll: () => void;
+  onShowFewer: () => void;
   isOver: boolean;
   dragId: string | null;
   setDragId: (id: string | null) => void;
@@ -94,10 +157,15 @@ function BoardColumn({
   onToggleCollapse: () => void;
   onOpen?: (app: Application) => void;
   onEdit?: (app: Application) => void;
-  onStatusChange: (app: Application, status: Status) => void;
+  onDropApp: (id: string) => void;
+  onStatusChange?: (app: Application, status: Status) => void;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
-  useFlipList(listRef, cards);
+  const droppedIndex = droppedId ? cards.findIndex((c) => c.id === droppedId) : -1;
+  const effectiveLimit = droppedIndex >= colLimit ? droppedIndex + 1 : colLimit;
+  const visibleCards = cards.slice(0, effectiveLimit);
+  useFlipList(listRef, visibleCards);
+  const matcha = useMatcha();
 
   const handleOpen = onOpen || onEdit;
   const pct = Math.round((cards.length / Math.max(1, apps.length)) * 100);
@@ -105,9 +173,22 @@ function BoardColumn({
   if (isCollapsed) {
     return (
       <div
+        onDragOver={(e) => {
+          e.preventDefault();
+          setOverCol(() => statusKey);
+        }}
+        onDragLeave={() => setOverCol((c) => (c === statusKey ? null : c))}
+        onDrop={(e) => {
+          e.preventDefault();
+          setOverCol(() => null);
+          const id = e.dataTransfer.getData('text/plain');
+          if (id) onDropApp(id);
+        }}
         onClick={onToggleCollapse}
         title={`Expand ${label} (${cards.length})`}
-        className="flex h-[400px] w-12 flex-none cursor-pointer flex-col items-center justify-between rounded-md border-2 border-line bg-panel-2/40 py-4 shadow-hardSm transition hover:bg-panel-2 hover:border-accent"
+        className={`mx-board-collapsed flex h-[400px] w-12 flex-none cursor-pointer flex-col items-center justify-between rounded-md border-2 bg-panel-2/40 py-4 shadow-hardSm transition hover:bg-panel-2 hover:border-accent ${
+          isOver ? 'border-accent bg-accent/[0.06] shadow-hardMd' : 'border-line'
+        }`}
       >
         <div className="flex flex-col items-center gap-2">
           <StatusIcon status={statusKey} />
@@ -134,24 +215,31 @@ function BoardColumn({
         e.preventDefault();
         setOverCol(() => null);
         const id = e.dataTransfer.getData('text/plain');
-        const app = apps.find((a) => a.id === id);
-        if (app && app.status !== statusKey) {
-          onStatusChange(app, statusKey);
-          playSound('tick');
-        }
+        if (id) onDropApp(id);
       }}
-      className={`flex max-h-[70vh] min-h-[8rem] w-[85vw] flex-none flex-col
+      data-status={statusKey}
+      className={`mx-board-col flex max-h-[70vh] min-h-[8rem] w-[85vw] flex-none flex-col
                   rounded-md border-2 transition sm:max-h-[calc(100vh-20rem)] sm:w-[18.5rem]
                   ${isOver ? 'border-accent bg-accent/[0.06] shadow-hardMd' : 'border-line bg-panel-2/30 shadow-hardSm'}`}
     >
-      <div className="flex flex-none items-center justify-between border-b-2 border-line bg-panel px-3.5 py-2.5">
-        <div className="flex items-center gap-2">
-          <StatusIcon status={statusKey} />
-          <span className="text-meta font-bold uppercase tracking-wider text-ink">{label}</span>
-          <span className="chip px-1.5 py-0 text-micro font-mono">
-            <AnimatedCounter value={cards.length} /> <span className="text-ink-faint">(<AnimatedCounter value={pct} />%)</span>
-          </span>
-        </div>
+      <div className="mx-board-head flex flex-none items-center justify-between border-b-2 border-line bg-panel px-3.5 py-2.5">
+        {matcha ? (
+          <div className="flex min-w-0 flex-1 items-center justify-between gap-2 pr-2">
+            <span className={`mx-mono flex items-center gap-2 ${STATUS_TEXT_COLOR[statusKey]}`}>
+              <StatusIcon status={statusKey} />
+              {label}
+            </span>
+            <span className="mx-numeral-xs font-display-matcha">{String(cards.length).padStart(2, '0')}</span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <StatusIcon status={statusKey} />
+            <span className="text-meta font-bold uppercase tracking-wider text-ink">{label}</span>
+            <span className="chip px-1.5 py-0 text-micro font-mono">
+              <AnimatedCounter value={cards.length} /> <span className="text-ink-faint">(<AnimatedCounter value={pct} />%)</span>
+            </span>
+          </div>
+        )}
         <button
           onClick={onToggleCollapse}
           title={`Collapse ${label} column`}
@@ -162,7 +250,7 @@ function BoardColumn({
       </div>
 
       <div ref={listRef} className="flex flex-col gap-2.5 overflow-y-auto p-3">
-        {cards.map((a) => (
+        {visibleCards.map((a) => (
           <div
             key={a.id}
             draggable
@@ -180,7 +268,7 @@ function BoardColumn({
             }}
             tabIndex={0}
             role="button"
-            className={`group cursor-grab rounded-md border-2 border-line bg-panel p-3.5 shadow-hardSm
+            className={`mx-board-card group cursor-grab rounded-md border-2 border-line bg-panel p-3.5 shadow-hardSm
                        transition duration-150 hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-hardMd active:cursor-grabbing
                        focus:outline-none focus-visible:ring-[3px] focus-visible:ring-accent/30
                        ${dragId === a.id ? 'opacity-40' : ''}
@@ -202,6 +290,7 @@ function BoardColumn({
                   {a.role}
                 </div>
                 <div className="mt-0.5 text-micro text-ink-soft font-medium">{a.company}</div>
+                {matcha && shortDate(a.date) && <div className="mx-mono mt-1 text-ink-faint">{shortDate(a.date)}</div>}
               </div>
             </div>
 
@@ -231,7 +320,7 @@ function BoardColumn({
               <span className="text-micro font-medium text-ink-faint">Move to:</span>
               <select
                 value={a.status}
-                onChange={(e) => onStatusChange(a, e.target.value as Status)}
+                onChange={(e) => onStatusChange?.(a, e.target.value as Status)}
                 className="rounded border border-line bg-panel-2 px-1.5 py-0.5 text-micro font-medium text-ink"
               >
                 {STATUSES.map((s) => (
@@ -248,6 +337,17 @@ function BoardColumn({
           <div className="rounded border-2 border-dashed border-line-soft p-5 text-center text-micro text-ink-faint">
             No applications in {label.toLowerCase()}
           </div>
+        )}
+
+        {cards.length > 6 && (
+          <ShowMoreControl
+            total={cards.length}
+            visible={effectiveLimit}
+            variant="column"
+            onShowMore={onShowMore}
+            onShowAll={onShowAll}
+            onShowFewer={onShowFewer}
+          />
         )}
       </div>
     </div>

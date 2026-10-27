@@ -2,6 +2,16 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Matcha Style: display headings and big numerals only (no · — – → ✓ glyphs;
+   the font stack falls back to Outfit for those). Used from phase 3. */
+@font-face {
+  font-family: 'Matcha Style';
+  src: url('/fonts/MatchaStyle.woff2') format('woff2'), url('/fonts/MatchaStyle.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 @layer base {
   :root {
     /* Bauhaus redesign (DESIGN.md, 23 Aug 2026) — off-white canvas, stark-black
@@ -191,6 +201,61 @@
 
     --shadow-hard: 30 41 59;
     --pulse: 52 211 153;
+
+    color-scheme: dark;
+  }
+
+  /* Matcha: fourth selectable theme (Matcha Ops redesign, phase 1). Tokens only. */
+  [data-theme='matcha'] {
+    --canvas: 246 244 236;
+    --panel: 255 255 255;
+    --panel-2: 237 234 221;
+    --ink: 22 25 15;
+    --ink-soft: 78 82 66;
+    --ink-faint: 100 104 82;
+    --line: 196 193 174;
+    --line-soft: 218 215 200;
+    --field-line: 128 131 112;
+
+    --accent: 63 107 0;
+    --on-accent: 246 244 236;
+
+    --neutral: 78 82 66;
+    --applied: 8 100 74;
+    --amber: 135 90 0;
+    --rose: 186 51 38;
+    --grass: 21 122 64;
+    --primary-yellow: 214 168 40;
+
+    --shadow-hard: 218 215 200;
+    --pulse: 63 107 0;
+
+    color-scheme: light;
+  }
+
+  .dark[data-theme='matcha'] {
+    --canvas: 13 15 11;
+    --panel: 21 24 18;
+    --panel-2: 28 32 23;
+    --ink: 236 234 224;
+    --ink-soft: 163 167 148;
+    --ink-faint: 138 143 124;
+    --line: 58 64 48;
+    --line-soft: 42 47 35;
+    --field-line: 104 110 92;
+
+    --accent: 198 240 77;
+    --on-accent: 16 20 10;
+
+    --neutral: 163 167 148;
+    --applied: 95 212 176;
+    --amber: 242 184 75;
+    --rose: 240 118 107;
+    --grass: 133 214 100;
+    --primary-yellow: 242 184 75;
+
+    --shadow-hard: 42 47 35;
+    --pulse: 198 240 77;
 
     color-scheme: dark;
   }
@@ -428,29 +493,6 @@
 
   .panel-inset {
     @apply rounded-md border-2 border-line bg-panel-2/50;
-  }
-
-  /* Bento Grid Card (v6.0.0 Flight Deck) with interactive mouse spotlight */
-  .bento-card {
-    @apply relative overflow-hidden rounded-md border-2 border-line bg-panel shadow-hardSm transition-all duration-200;
-  }
-  .bento-card:hover {
-    @apply shadow-hardMd -translate-x-[2px] -translate-y-[2px];
-  }
-  .bento-spotlight {
-    pointer-events: none;
-    position: absolute;
-    inset: 0;
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    background: radial-gradient(
-      450px circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
-      rgb(var(--accent) / 0.08),
-      transparent 80%
-    );
-  }
-  .bento-card:hover .bento-spotlight {
-    opacity: 1;
   }
 
   /* Empty/placeholder states: same geometry, dashed edge to read as "nothing
@@ -758,13 +800,6 @@
   }
 
   /* Radar Ping Wave for Imminent Deadlines */
-  .radar-ping-container {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
-
   .radar-ping-ring {
     position: absolute;
     inset: -4px;
@@ -797,15 +832,6 @@
     backface-visibility: hidden;
   }
 
-  /* ---- Plnty & Kott inspired Modern Minimal Utilities (v6.1.0) ---- */
-  .hp-squircle {
-    border-radius: 20px;
-    border: 1px solid rgba(0, 0, 0, 0.08);
-  }
-  .dark .hp-squircle {
-    border: 1px solid rgba(255, 255, 255, 0.09);
-  }
-
   /* Minimal Studio Dashboard Tile */
   .studio-tile {
     position: relative;
@@ -832,70 +858,6 @@
     border-color: rgba(255, 255, 255, 0.16);
   }
 
-  /* Spotlight glow on studio tile */
-  .studio-spotlight {
-    pointer-events: none;
-    position: absolute;
-    inset: 0;
-    opacity: 0;
-    transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-    background: radial-gradient(
-      450px circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
-      rgba(var(--accent) / 0.07),
-      transparent 75%
-    );
-  }
-  .studio-tile:hover .studio-spotlight {
-    opacity: 1;
-  }
-
-  /* Vibrant Candy Pods */
-  .candy-pod {
-    border-radius: 18px;
-    border-width: 1px;
-    transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1),
-                box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1),
-                filter 0.2s ease;
-  }
-  .candy-pod:hover {
-    transform: translateY(-2px) scale(1.015);
-  }
-  .candy-pod:active {
-    transform: translateY(0) scale(0.99);
-  }
-
-  /* Continuous Marquee Ticker Track */
-  .ticker-marquee-track {
-    display: flex;
-    overflow: hidden;
-    user-select: none;
-    mask-image: linear-gradient(to right, transparent 0%, black 5%, black 95%, transparent 100%);
-    -webkit-mask-image: linear-gradient(to right, transparent 0%, black 5%, black 95%, transparent 100%);
-  }
-  .ticker-marquee-run {
-    display: flex;
-    flex-shrink: 0;
-    align-items: center;
-    gap: 1.5rem;
-    animation: marquee-glide 34s linear infinite;
-  }
-  .ticker-marquee-track:hover .ticker-marquee-run {
-    animation-play-state: paused;
-  }
-  @keyframes marquee-glide {
-    0% { transform: translateX(0); }
-    100% { transform: translateX(-50%); }
-  }
-
-  /* Fine noise grain */
-  .grain-overlay {
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    opacity: 0.03;
-    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
-    z-index: 40;
-  }
 }
 
 /* Native View Transitions */
@@ -930,4 +892,745 @@
   .radar-ping-ring {
     display: none !important;
   }
+}
+
+/* ==== Matcha Ops, phase 2: shared look =====================================
+ * Unlayered on purpose: Bauhaus shape (hard shadow, 2px border, press
+ * translate) is baked in as Tailwind utilities, which sit in a later layer than
+ * @layer components, so only unlayered rules can replace it. Every selector
+ * here starts with [data-theme='matcha'], so the other themes are untouched.
+ * Focus: box-shadow rings are cleared with the hard shadow, so each control
+ * gets an explicit 2px accent outline on :focus-visible instead. */
+[data-theme='matcha'] :is(button, a, input, select, textarea, summary, [role='tab'], [tabindex]:not([tabindex='-1'])):focus-visible {
+  outline: 2px solid rgb(var(--accent));
+  outline-offset: 2px;
+}
+[data-theme='matcha'] [cmdk-input]:focus-visible {
+  outline: none;
+}
+
+/* Surfaces */
+[data-theme='matcha'] .panel,
+[data-theme='matcha'] .app-card-surface {
+  border: 1px solid rgb(var(--line-soft));
+  border-radius: 22px;
+  box-shadow: none;
+}
+[data-theme='matcha'] .panel-inset {
+  border: 1px solid rgb(var(--line-soft));
+  border-radius: 18px;
+}
+[data-theme='matcha'] .panel-empty {
+  border: 1px dashed rgb(var(--line-soft));
+  border-radius: 22px;
+}
+[data-theme='matcha'] .panel-header {
+  border-bottom-width: 1px;
+}
+[data-theme='matcha'] .app-card-surface:hover {
+  border-color: rgb(var(--line));
+  box-shadow: none;
+}
+
+/* Buttons: pills, no offset shadow, press by scale/opacity only */
+[data-theme='matcha'] .btn-primary,
+[data-theme='matcha'] .btn-quiet,
+[data-theme='matcha'] .btn-ghost {
+  border-radius: 999px;
+  border-width: 1px;
+  box-shadow: none;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+  transition: transform 150ms ease, opacity 150ms ease, background-color 150ms ease, border-color 150ms ease, filter 150ms ease;
+}
+[data-theme='matcha'] .btn-primary {
+  border-color: transparent;
+  background-color: rgb(var(--accent));
+  color: rgb(var(--on-accent));
+}
+[data-theme='matcha'] .btn-quiet,
+[data-theme='matcha'] .btn-ghost {
+  border-color: rgb(var(--line));
+  background-color: transparent;
+}
+[data-theme='matcha'] .btn-primary:hover,
+[data-theme='matcha'] .btn-quiet:hover,
+[data-theme='matcha'] .btn-ghost:hover {
+  transform: none;
+  box-shadow: none;
+}
+[data-theme='matcha'] .btn-primary:hover {
+  filter: brightness(1.08);
+}
+[data-theme='matcha'] .btn-quiet:hover,
+[data-theme='matcha'] .btn-ghost:hover {
+  border-color: rgb(var(--accent) / 0.55);
+  background-color: rgb(var(--panel-2) / 0.7);
+}
+[data-theme='matcha'] .btn-primary:active,
+[data-theme='matcha'] .btn-quiet:active,
+[data-theme='matcha'] .btn-ghost:active {
+  transform: scale(0.97);
+  opacity: 0.85;
+  box-shadow: none;
+}
+
+/* Inputs */
+[data-theme='matcha'] .field-input {
+  border-width: 1px;
+  border-radius: 14px;
+  box-shadow: none;
+}
+[data-theme='matcha'] .field-input:focus {
+  border-color: rgb(var(--accent));
+  box-shadow: none;
+}
+
+/* TabStrip: hairline pills, accent-tinted active state */
+[data-theme='matcha'] [role='tablist'] > span,
+[data-theme='matcha'] [role='tablist'] > button {
+  border-width: 1px;
+}
+[data-theme='matcha'] [role='tablist'] > button {
+  box-shadow: none;
+}
+[data-theme='matcha'] [role='tablist'] > button:hover {
+  transform: none;
+  box-shadow: none;
+}
+[data-theme='matcha'] [role='tablist'] > .rounded-md {
+  border-radius: 14px;
+}
+
+/* Chips and status pills: outlined, no lift (their hue classes are untouched) */
+[data-theme='matcha'] .chip:hover {
+  transform: none;
+  border-color: rgb(var(--accent) / 0.45);
+}
+[data-theme='matcha'] .section-label {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+}
+[data-theme='matcha'] .section-label::before {
+  border-radius: 999px;
+}
+
+/* Header and sidebar */
+[data-theme='matcha'] .glass-header {
+  background: rgb(var(--panel) / 0.82);
+  border: 1px solid rgb(var(--line-soft));
+  box-shadow: none;
+}
+.dark[data-theme='matcha'] .glass-header {
+  background: rgb(var(--panel) / 0.78);
+  border-color: rgb(var(--line-soft));
+  box-shadow: none;
+}
+[data-theme='matcha'] .nav-active-pill {
+  border: 1px solid rgb(var(--accent) / 0.4);
+  background: rgb(var(--accent) / 0.12);
+  border-radius: 14px;
+  box-shadow: none;
+}
+[data-theme='matcha'] aside [aria-current='page'] {
+  color: rgb(var(--accent));
+}
+
+/* Mobile bottom nav and More sheet */
+[data-theme='matcha'] nav.fixed.inset-x-0.bottom-0 {
+  border-top-color: rgb(var(--line-soft));
+}
+
+/* Modals, command palette, More sheet (all role=dialog) and their backdrops */
+[data-theme='matcha'] [role='dialog'] {
+  border-color: rgb(var(--line-soft));
+  box-shadow: 0 28px 70px -28px rgb(0 0 0 / 0.5);
+}
+[data-theme='matcha'] .fixed.inset-0[class*='backdrop-blur'] {
+  background-color: rgb(var(--canvas) / 0.62);
+}
+.dark[data-theme='matcha'] .fixed.inset-0[class*='backdrop-blur'] {
+  background-color: rgb(6 8 4 / 0.66);
+}
+[data-theme='matcha'] [cmdk-item][data-selected='true'] {
+  background-color: rgb(var(--accent) / 0.12);
+}
+
+/* Matcha body font: Instrument Sans, served from node_modules via
+ * @fontsource-variable. Only Matcha selects the family, so browsers fetch its
+ * files only when that theme is active. Outfit stays as the fallback. */
+[data-theme='matcha'] body {
+  font-family: 'Instrument Sans Variable', 'Outfit Variable', 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* ==== Matcha Ops, phase 3: layout helpers for the matcha-only components ====
+ * Matcha Style is used only by the display/numeral classes below; the glyphs
+ * it lacks (middle dot, dashes, arrow, check) never appear inside them. */
+[data-theme='matcha'] .mx-mono {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+[data-theme='matcha'] .mx-display-xl {
+  font-size: clamp(3.75rem, 9vw, 9.25rem);
+  line-height: 0.9;
+  letter-spacing: -0.01em;
+}
+[data-theme='matcha'] .mx-display-lg {
+  font-size: clamp(2.5rem, 5vw, 4.5rem);
+  line-height: 1;
+}
+[data-theme='matcha'] .mx-display-md {
+  font-size: clamp(2.25rem, 4vw, 3.5rem);
+  line-height: 1;
+}
+[data-theme='matcha'] .mx-display-sm {
+  font-size: 2.5rem;
+  line-height: 1;
+}
+[data-theme='matcha'] .mx-numeral {
+  font-size: clamp(3rem, 5vw, 4.5rem);
+  line-height: 1;
+}
+[data-theme='matcha'] .mx-numeral-sm {
+  font-size: 2.25rem;
+  line-height: 1;
+}
+[data-theme='matcha'] .mx-row:hover {
+  background-color: rgb(var(--panel-2) / 0.6);
+}
+
+/* Activity ticker: slides left forever, pauses on hover/focus, and sits still
+ * (scrollable) when the user prefers reduced motion. */
+@keyframes mx-tick {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+[data-theme='matcha'] .mx-tape {
+  display: flex;
+  width: max-content;
+  animation: mx-tick 40s linear infinite;
+}
+[data-theme='matcha'] .mx-ticker:hover .mx-tape,
+[data-theme='matcha'] .mx-ticker:focus-within .mx-tape {
+  animation-play-state: paused;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-theme='matcha'] .mx-tape {
+    animation: none;
+  }
+  [data-theme='matcha'] .mx-ticker {
+    overflow-x: auto;
+  }
+}
+
+/* ==== Matcha Ops, phase 3 step 2: role page, board and table ================ */
+[data-theme='matcha'] .mx-display-role {
+  font-size: clamp(2.75rem, 6.5vw, 6.5rem);
+  line-height: 0.95;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+[data-theme='matcha'] .mx-numeral-lg {
+  font-size: clamp(3.5rem, 7vw, 6rem);
+  line-height: 1;
+}
+[data-theme='matcha'] .mx-numeral-xs {
+  font-size: 1.75rem;
+  line-height: 1;
+}
+[data-theme='matcha'] .mx-clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Board: hairline columns with a status-hued rule under the header, soft cards */
+[data-theme='matcha'] .mx-board-col {
+  border: 1px solid rgb(var(--line-soft));
+  border-radius: 22px;
+  box-shadow: none;
+  background: transparent;
+  overflow: hidden;
+}
+[data-theme='matcha'] .mx-board-head {
+  background: transparent;
+  border-bottom-width: 2px;
+  border-bottom-color: rgb(var(--neutral));
+  padding: 1rem 1.1rem 0.9rem;
+}
+[data-theme='matcha'] .mx-board-col[data-status='applied'] .mx-board-head { border-bottom-color: rgb(var(--applied)); }
+[data-theme='matcha'] .mx-board-col[data-status='interview'] .mx-board-head { border-bottom-color: rgb(var(--amber)); }
+[data-theme='matcha'] .mx-board-col[data-status='offer'] .mx-board-head { border-bottom-color: rgb(var(--grass)); }
+[data-theme='matcha'] .mx-board-col[data-status='rejected'] .mx-board-head { border-bottom-color: rgb(var(--rose)); }
+[data-theme='matcha'] .mx-board-card {
+  border: 1px solid rgb(var(--line-soft));
+  border-radius: 18px;
+  background-image: none;
+  box-shadow: none;
+  transition: border-color 150ms ease;
+}
+[data-theme='matcha'] .mx-board-card:hover {
+  transform: none;
+  box-shadow: none;
+  border-color: rgb(var(--accent));
+}
+[data-theme='matcha'] .mx-board-collapsed {
+  border: 1px solid rgb(var(--line-soft));
+  border-radius: 22px;
+  box-shadow: none;
+}
+
+/* Table: hairline frame, mono small-caps header */
+[data-theme='matcha'] .mx-table {
+  border: 1px solid rgb(var(--line-soft));
+  border-radius: 22px;
+  box-shadow: none;
+}
+[data-theme='matcha'] .mx-table-head {
+  background: transparent;
+  border-bottom-width: 1px;
+  border-bottom-color: rgb(var(--line-soft));
+}
+[data-theme='matcha'] .mx-table-head th {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+}
+
+/* ==== Matcha Ops, phase 3 step 3: Study, Insights, Agenda, Settings, Outreach ==== */
+[data-theme='matcha'] .mx-display-page {
+  font-size: clamp(3rem, 7vw, 7rem);
+  line-height: 0.92;
+  letter-spacing: -0.01em;
+}
+[data-theme='matcha'] .mx-numeral-md {
+  font-size: 2.5rem;
+  line-height: 1;
+}
+/* the ATS overall score is digits only, so it can take the display face */
+[data-theme='matcha'] .text-stat {
+  font-family: 'Matcha Style', 'Outfit Variable', 'Outfit', sans-serif;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+[data-theme='matcha'] .mx-agenda-month {
+  font-family: 'Matcha Style', 'Outfit Variable', 'Outfit', sans-serif;
+  font-size: 2.25rem;
+  font-weight: 400;
+  line-height: 1;
+}
+/* the "never sends mail" notice stays visible and reads as a notice, not a footnote */
+[data-theme='matcha'] .mx-notice {
+  border: 1px solid rgb(var(--line));
+  border-radius: 16px;
+  padding: 0.875rem 1.125rem;
+  font-size: 0.8125rem;
+  color: rgb(var(--ink-soft));
+}
+
+/* ==== Matcha Ops, phase 3 step 4: phone polish (390px) ====================
+ * 44px tap targets. Real controls grow; text-style links gain invisible block
+ * padding with a matching negative margin so nothing shifts. */
+@media (max-width: 767px) {
+  [data-theme='matcha'] :is(.btn-primary, .btn-quiet, .btn-ghost, select, .field-input, button[class*='h-8'], button[class*='h-9'], button[class*='group/theme'], button[class*='inline-flex'][class*='gap-2'], a[class*='inline-flex'][class*='gap-2']) {
+    min-height: 44px;
+  }
+  [data-theme='matcha'] :is(.btn-primary, .btn-quiet, .btn-ghost, button[class*='w-8'], button[class~='p-1.5'], button[class~='p-1'], button[class*='text-ink-faint']) {
+    min-width: 44px;
+  }
+  [data-theme='matcha'] :is(button[class~='p-1.5'], button[class~='p-1']) {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  [data-theme='matcha'] :is(.link-quiet, a.truncate, a[class*='homelink'], a[class*='hover:text-accent'], button.mx-mono, button[class*='text-ink-faint']:not(.btn-ghost):not([class~='p-1']):not([class~='p-1.5']), button[class*='inline-flex'][class*='gap-1'], button[class*='gap-1.5'][class*='flex'], a[class*='text-red-600'], a[class*='inline-flex'][class*='mt-1.5']) {
+    padding-block: 15px;
+    margin-block: -15px;
+  }
+  /* toggle switches keep their look; the tap area grows around them */
+  [data-theme='matcha'] button[class*='h-6'][class*='w-11']::after {
+    content: '';
+    position: absolute;
+    inset: -14px 0;
+  }
+  /* seven calendar columns need every pixel to stay at 44px wide */
+  [data-theme='matcha'] .mx-agenda-grid {
+    padding-inline: 0.5rem;
+  }
+  [data-theme='matcha'] .mx-agenda-grid .grid-cols-7 {
+    gap: 2px;
+  }
+}
+
+/* The bottom nav's active marker is meant to be a 3px bar on the tab's top edge, but the shared
+ * flip helper sizes it to the whole tab. Under Matcha it is pinned back to a bar. */
+[data-theme='matcha'] nav.fixed.inset-x-0.bottom-0 > span[aria-hidden='true'] {
+  height: 3px !important;
+  border-radius: 0 0 3px 3px;
+}
+
+/* ==== Matcha Ops, step 5.1: Direct approach and Recruiters card grid ======= */
+[data-theme='matcha'] .outreach-row:has(> .mx-ocard[data-open='true']) {
+  grid-column: 1 / -1;
+}
+[data-theme='matcha'] .mx-ogrid > .outreach-row {
+  min-width: 0;
+}
+[data-theme='matcha'] .mx-ocard {
+  transition: border-color 150ms ease;
+}
+[data-theme='matcha'] .mx-ocard:hover {
+  border-color: rgb(var(--accent) / 0.6);
+}
+
+/* ==== Matcha Ops, step 5.2: one-row applications toolbar ================== */
+[data-theme='matcha'] .mx-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2.5rem;
+  padding: 0 0.9rem;
+  border: 1px solid rgb(var(--line));
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: rgb(var(--ink-soft));
+  white-space: nowrap;
+  transition: border-color 150ms ease, color 150ms ease, background-color 150ms ease;
+}
+[data-theme='matcha'] .mx-chip:hover {
+  border-color: rgb(var(--accent) / 0.55);
+  color: rgb(var(--ink));
+}
+[data-theme='matcha'] .mx-chip-on {
+  border-color: rgb(var(--accent));
+  background-color: rgb(var(--accent) / 0.12);
+  color: rgb(var(--accent));
+}
+[data-theme='matcha'] .mx-pillselect {
+  min-height: 2.5rem;
+  padding-block: 0;
+  border-radius: 999px;
+}
+[data-theme='matcha'] select.mx-pillselect {
+  padding-left: 1rem;
+  padding-right: 2rem;
+}
+[data-theme='matcha'] .mx-pillselect-on {
+  border-color: rgb(var(--accent));
+  color: rgb(var(--accent));
+}
+@media (max-width: 767px) {
+  [data-theme='matcha'] .mx-chip {
+    min-height: 44px;
+  }
+  [data-theme='matcha'] .mx-pillselect {
+    min-height: 44px;
+  }
+}
+
+/* ==== Matcha Ops, step 5.3: slim header ===================================== */
+[data-theme='matcha'] .mx-cmdbox {
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 2.5rem;
+  min-width: 15rem;
+  max-width: 22rem;
+  flex: 0 1 20rem;
+  padding: 0 1rem;
+  border: 1px solid rgb(var(--line));
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  color: rgb(var(--ink-soft));
+  transition: border-color 150ms ease, color 150ms ease;
+}
+[data-theme='matcha'] .mx-cmdbox:hover {
+  border-color: rgb(var(--accent) / 0.55);
+  color: rgb(var(--ink));
+}
+
+/* ==== Matcha Ops, step 5.4: Settings ======================================= */
+[data-theme='matcha'] .mx-sgroup .mx-srow:last-child {
+  border-bottom: 0;
+}
+[data-theme='matcha'] .mx-switch {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+[data-theme='matcha'] .mx-vcard {
+  border-color: rgb(var(--line-soft));
+  background: transparent;
+  transition: border-color 150ms ease, background-color 150ms ease;
+}
+[data-theme='matcha'] .mx-vcard:hover {
+  border-color: rgb(var(--line));
+}
+[data-theme='matcha'] .mx-vcard[data-selected='true'] {
+  border-color: rgb(var(--accent));
+  background: rgb(var(--accent) / 0.07);
+}
+[data-theme='matcha'] .mx-vbtn {
+  min-height: 2.5rem;
+  border-radius: 999px;
+}
+[data-theme='matcha'] .mx-vcard .mx-vbtn[disabled] {
+  opacity: 1;
+}
+@media (max-width: 767px) {
+  [data-theme='matcha'] .mx-vbtn {
+    min-height: 44px;
+  }
+}
+/* the selected voice's disabled "Selected" button is accent-filled, so it takes the on-accent text colour */
+[data-theme='matcha'] .mx-vcard[data-selected='true'] .mx-vbtn[disabled] {
+  color: rgb(var(--on-accent));
+}
+
+/* ==== Matcha Ops, step 5.5: Agenda grid ==================================== */
+[data-theme='matcha'] .mx-cal-cell {
+  background: transparent;
+}
+[data-theme='matcha'] .mx-cal-cell:hover {
+  background: rgb(var(--panel-2) / 0.6);
+}
+[data-theme='matcha'] .mx-cal-cell[data-selected='true'] {
+  background: rgb(var(--accent) / 0.1);
+  box-shadow: inset 0 0 0 2px rgb(var(--accent));
+}
+[data-theme='matcha'] .mx-agenda-grid .mx-cal {
+  gap: 0;
+}
+
+/* ==== Matcha Ops, step 5.7: Study skill-guide cards ======================== */
+[data-theme='matcha'] .mx-display-card {
+  font-size: clamp(1.75rem, 2.4vw, 2.25rem);
+  line-height: 1.1;
+}
+[data-theme='matcha'] .mx-gstep {
+  min-height: 2.5rem;
+}
+[data-theme='matcha'] .mx-gguides > *:has(details[open]) {
+  grid-column: 1 / -1;
+}
+@media (max-width: 767px) {
+  [data-theme='matcha'] .mx-gstep {
+    min-height: 44px;
+  }
+  [data-theme='matcha'] .mx-qbtn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* ==== Matcha Ops, step 5.9: sweep of the inherited pages ====================
+ * Visual only. Attribute selectors on purpose (no utility class names in
+ * hand-written selectors; Tailwind rewrites those when something @applies them). */
+
+/* Command palette: sentence-case rows like Palette.dc.html (the base look uppercases them) */
+[data-theme='matcha'] [cmdk-item] {
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 500;
+}
+[data-theme='matcha'] [cmdk-group-heading] {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  letter-spacing: 0.08em;
+}
+
+/* The one hover emoji left on the applications row ("Applied" button) */
+[data-theme='matcha'] button .emoji[class*='group-hover/apply'] {
+  display: none;
+}
+
+/* Summer of Tech pages (hub, Floor Mode, Clinic, Playbook): they use Tailwind's own red scale
+ * as the SOT brand colour, which is red in every theme and misses contrast on Matcha's canvas.
+ * Under Matcha the red scale reads as the Matcha accent instead. */
+[data-theme='matcha'] .mx-sot [class*='text-red-'] {
+  color: rgb(var(--accent));
+}
+[data-theme='matcha'] .mx-sot [class*='border-red-'] {
+  border-color: rgb(var(--accent) / 0.4);
+}
+[data-theme='matcha'] .mx-sot [class*='ring-red-'] {
+  --tw-ring-color: rgb(var(--accent) / 0.5);
+}
+[data-theme='matcha'] .mx-sot [class*='bg-red-'] {
+  background-color: rgb(var(--accent) / 0.1);
+}
+[data-theme='matcha'] .mx-sot :is([class~='bg-red-500'], [class~='bg-red-600'], [class~='bg-red-700']) {
+  background-color: rgb(var(--accent));
+  color: rgb(var(--on-accent));
+}
+[data-theme='matcha'] .mx-sot [class*='from-red-'] {
+  --tw-gradient-from: rgb(var(--accent) / 0.1) var(--tw-gradient-from-position);
+  --tw-gradient-to: rgb(var(--accent) / 0) var(--tw-gradient-to-position);
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to);
+}
+
+/* ==== Matcha Ops, step 5.10: contrast fixes (WCAG AA) =======================
+ * Tokens above: --ink-faint, --applied (light) and --amber (light) were raised.
+ * The rules below are Matcha-scoped corrections for places that dim or recolour text. */
+[data-theme='matcha'] .mx-mono[class*='opacity-70'],
+[data-theme='matcha'] [role='tab'] span[class*='opacity-70'] {
+  opacity: 1;
+}
+[data-theme='matcha'] [class*='text-accent/70'] {
+  color: rgb(var(--accent));
+}
+/* Solid accent badges and avatars whose text is hard-coded white (white on the dark theme's lime is 1.3:1) */
+[data-theme='matcha'] [class~='bg-accent'][class~='text-white'] {
+  color: rgb(var(--on-accent));
+}
+/* The /miniapp Today badge uses a colour class that does not exist, so its white digit sat on the page: give it the amber token */
+[data-theme='matcha'] [class~='bg-amber-500'] {
+  background-color: rgb(var(--amber));
+  color: rgb(var(--canvas));
+}
+:root:not(.dark)[data-theme='matcha'] span[class*='bg-accent/15'] {
+  color: rgb(44 77 0);
+}
+:root:not(.dark)[data-theme='matcha'] [class*='text-red-600'] {
+  color: rgb(var(--rose));
+}
+:root:not(.dark)[data-theme='matcha'] [class*='text-emerald-600'] {
+  color: rgb(var(--applied));
+}
+:root:not(.dark)[data-theme='matcha'] [class*='text-sky-600'] {
+  color: rgb(47 88 173);
+}
+/* "Live" chip in the command palette sits on the selected row's tint */
+:root:not(.dark)[data-theme='matcha'] [cmdk-item] [class*='text-red-'] {
+  color: rgb(159 42 31);
+}
+.dark[data-theme='matcha'] [cmdk-item] [class*='text-red-'] {
+  color: rgb(255 144 135);
+}
+
+/* ==== Matcha Ops, step 5.12: form-control borders reach 3:1 (WCAG 1.4.11) ====
+ * Only the border of text inputs, selects and textareas; cards, dividers and tabs keep --line. */
+[data-theme='matcha'] :is(input, select, textarea):is(.field-input, [class*='border-line']):not([class*='border-transparent'], [class*='border-0']) {
+  border-color: rgb(var(--field-line));
+}
+[data-theme='matcha'] .field-input:focus,
+[data-theme='matcha'] :is(input, select, textarea):is([class*='border-line']):focus {
+  border-color: rgb(var(--accent));
+}
+
+/* ==== Matcha Ops, step 5.13 (follow-up 1): Agenda out-of-month days ========
+ * The whole cell used to be dimmed to 40% (about 2:1). Now only the day number is quieter, by being
+ * smaller and lighter in weight, in --ink-faint (4.7:1 or better); anything the cell holds is 85%. */
+[data-theme='matcha'] .mx-cal-cell[class*='opacity-40'] {
+  opacity: 1;
+}
+[data-theme='matcha'] .mx-cal-cell[class*='opacity-40'] > :first-child {
+  color: rgb(var(--ink-faint));
+  font-size: 0.75rem;
+  font-weight: 400;
+}
+[data-theme='matcha'] .mx-cal-cell[class*='opacity-40'] > :not(:first-child) {
+  opacity: 0.85;
+}
+
+/* ==== Matcha Ops, step 5.14 (follow-up 2): command palette search input boundary ==
+ * The input sat borderless in the dialog header. It now has an inset 1px ring in --field-line (3:1 or
+ * better against the dialog surface). An inset shadow adds no size; padding is traded between the input
+ * and its row so the header keeps its height. */
+[data-theme='matcha'] div:has(> [cmdk-input]) {
+  padding-block: 0.375rem;
+}
+[data-theme='matcha'] [cmdk-input] {
+  box-shadow: inset 0 0 0 1px rgb(var(--field-line));
+  border-radius: 12px;
+  padding: 0.625rem 0.75rem;
+}
+
+/* ==== Matcha Ops, step 5.15 (follow-up 3): palette footer hints ============== */
+[data-theme='matcha'] .mx-kbd {
+  border: 1px solid rgb(var(--field-line));
+  border-radius: 8px;
+  padding: 1px 7px;
+  font-family: inherit;
+  font-size: inherit;
+  color: rgb(var(--ink-soft));
+}
+
+/* ==== Matcha Ops, step 5.16 (follow-up 4): appearance popover ================ */
+[data-theme='matcha'] .mx-popover {
+  border-color: rgb(var(--line-soft));
+  box-shadow: 0 28px 70px -28px rgb(0 0 0 / 0.5);
+}
+
+/* ==== Matcha Ops, step 5.18 (follow-up 6): the slim rail ====================
+ * The collapsed sidebar already existed in every theme (header toggle, sidebar toggle, Ctrl+B, remembered in
+ * localStorage). Under Matcha the collapsed state now follows Rail.dc.html: an 88px column with a hairline on
+ * its right edge, a 44px logo tile, 48px icon buttons, the current page as a tinted tile in the accent. Expanded
+ * is untouched. Desktop only: the aside is hidden below md and the bottom nav takes over. */
+[data-theme='matcha'] aside[data-collapsed='true'] {
+  width: 88px;
+  margin-inline: 0;
+  padding-block: 28px;
+  border-right: 1px solid rgb(var(--line-soft));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+@media (max-width: 767px) {
+  [data-theme='matcha'] aside[data-collapsed='true'] {
+    display: none;
+  }
+}
+[data-theme='matcha'] aside[data-collapsed='true'] > * {
+  width: 100%;
+  flex-shrink: 0;
+}
+[data-theme='matcha'] aside[data-collapsed='true'] > .mx-rail-logo {
+  width: 44px;
+  height: 44px;
+  margin: 0 auto 20px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14px;
+  background: rgb(var(--accent));
+  color: rgb(var(--on-accent));
+  font-family: 'Matcha Style', 'Outfit Variable', serif;
+  font-size: 22px;
+  line-height: 1;
+}
+[data-theme='matcha'] aside[data-collapsed='true'] :is(nav button, [class*='group/appearance'], [class*='group/settings'], [class*='group/out']) {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+}
+[data-theme='matcha'] aside[data-collapsed='true'] nav [aria-current='page'] {
+  background: rgb(var(--panel-2));
+  color: rgb(var(--accent));
+}
+[data-theme='matcha'] aside[data-collapsed='true'] > div:first-of-type button:not(.mx-rail-logo) {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+}
+
+/* Matcha: the "+N" overflow chip on a role card is a 44px tap target on
+   phones. The hit area is an invisible ::after, so the chip looks the same. */
+@media (max-width: 767px) {
+  [data-theme='matcha'] .mx-more { position: relative; z-index: 1; }
+  [data-theme='matcha'] .mx-more::after { content: ''; position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; transform: translate(-50%, -50%); }
+}
+
+/* Lenis scroll-spy (src/lib/lenis.ts): current section link on the role page. */
+nav[aria-label="Sections"] a[data-spy-active] {
+  background-color: rgb(var(--accent) / 0.1);
+  color: rgb(var(--accent));
 }

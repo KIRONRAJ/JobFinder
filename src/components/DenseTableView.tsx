@@ -4,6 +4,7 @@ import { Icon } from './Icons';
 import { CompanyAvatar } from './CompanyAvatar';
 import { StatusPill, FIT_TEXT, TagBadge } from './Badges';
 import { isCvActuallyDone } from '../lib/readiness';
+import { ShowMoreControl } from './ShowMoreControl';
 import type { Application, FolderStatus } from '../types';
 
 interface Props {
@@ -14,6 +15,10 @@ interface Props {
   onRequestCv: (app: Application) => void;
   onMarkApplied: (app: Application) => void;
   onSelectTag?: (tag: string) => void;
+  limit?: number;
+  onShowMore?: () => void;
+  onShowAll?: () => void;
+  onShowFewer?: () => void;
 }
 
 type SortCol = 'company' | 'role' | 'status' | 'date' | 'deadline' | 'fit';
@@ -26,6 +31,10 @@ export function DenseTableView({
   onRequestCv,
   onMarkApplied,
   onSelectTag,
+  limit,
+  onShowMore,
+  onShowAll,
+  onShowFewer,
 }: Props) {
   const navigate = useNavigate();
   const [sortCol, setSortCol] = useState<SortCol>('date');
@@ -80,10 +89,10 @@ export function DenseTableView({
   );
 
   return (
-    <div className="overflow-hidden rounded-md border-2 border-line bg-panel shadow-hardSm">
+    <div className="mx-table overflow-hidden rounded-md border-2 border-line bg-panel shadow-hardSm">
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-left text-body">
-          <thead className="border-b-2 border-line bg-panel-2/70 text-ink-faint">
+          <thead className="mx-table-head border-b-2 border-line bg-panel-2/70 text-ink-faint">
             <tr>
               <SortHeader col="company" label="Company" className="pl-4 min-w-[180px]" />
               <SortHeader col="role" label="Role" className="min-w-[220px]" />
@@ -100,7 +109,7 @@ export function DenseTableView({
             </tr>
           </thead>
           <tbody className="divide-y divide-line-soft">
-            {sorted.map((app) => {
+            {(limit !== undefined ? sorted.slice(0, limit) : sorted).map((app) => {
               const folder = folders[app.id];
               const hasDrafts = isCvActuallyDone(app, folder);
 
@@ -268,6 +277,17 @@ export function DenseTableView({
           </tbody>
         </table>
       </div>
+      {limit !== undefined && onShowMore && onShowAll && onShowFewer && sorted.length > 6 && (
+        <div className="border-t border-line-soft bg-panel px-4 py-2">
+          <ShowMoreControl
+            total={sorted.length}
+            visible={limit}
+            onShowMore={onShowMore}
+            onShowAll={onShowAll}
+            onShowFewer={onShowFewer}
+          />
+        </div>
+      )}
       <div className="border-t border-line-soft bg-panel-2/30 px-4 py-2 text-micro text-ink-faint flex items-center justify-between">
         <span>Showing {sorted.length} applications in table view</span>
         <span>Click any row or role title for details</span>

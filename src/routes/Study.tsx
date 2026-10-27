@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react';
+import { MatchaGuideCard } from '../components/matcha/MatchaGuideCard';
 import { useSearchParams } from 'react-router-dom';
 import { Icon } from '../components/Icons';
 import { TabStrip } from '../components/TabStrip';
+import { MatchaPageHead } from '../components/matcha/MatchaPageHead';
+import { useMatcha } from '../lib/useMatcha';
 import { ReadinessBar } from '../components/ReadinessBar';
 import { MarkdownLite } from '../components/MarkdownLite';
 import { RoleRefreshers } from '../components/RoleRefreshers';
@@ -9,7 +12,7 @@ import { AssessmentPrep } from '../components/AssessmentPrep';
 import { InterviewBank } from '../components/InterviewBank';
 import { SkeletonPanels } from '../components/SkeletonRows';
 import { api } from '../api';
-import { copyText } from '../lib/clipboard';
+import { QUIZ_SCORES, useGuideCard } from '../lib/useGuideCard';
 import { gapLinkageFor } from '../lib/studyGuides';
 import { studyGuideComplete } from '../types';
 import type {
@@ -19,22 +22,6 @@ import type {
   StudyGuideProgress,
   UpskillReport,
 } from '../types';
-
-const QUIZ_SCORES = [0, 1, 2, 3, 4, 5];
-
-/** Per-guide readiness — the same 3-part model the plan describes: concepts
- *  read, exercise done, quiz passed (>=4/5). Deliberately not a weighted
- *  average of raw quiz score — a 3/5 quiz isn't "60% done with the quiz",
- *  it's "not yet passed", matching the index file's own retake rule. */
-function guideReadiness(p: StudyGuideProgress | undefined) {
-  const checks = [
-    { key: 'concepts', done: Boolean(p?.conceptsRead), label: 'Concepts read' },
-    { key: 'exercise', done: Boolean(p?.exerciseDone), label: 'Hands-on exercise done' },
-    { key: 'quiz', done: (p?.quizScore ?? 0) >= 4, label: 'Quiz passed (4/5 or better)' },
-  ];
-  const done = checks.filter((c) => c.done).length;
-  return { score: Math.round((done / checks.length) * 100), breakdown: checks };
-}
 
 type Tab = 'guides' | 'roles' | 'assessment' | 'questions';
 
@@ -58,6 +45,7 @@ const TAB_KEYS = new Set<string>(TABS.map((t) => t.key));
  * spending another sidebar item.
  */
 export function Study({ apps, onOpenTerminal }: { apps: Application[]; onOpenTerminal: () => void }) {
+  const matcha = useMatcha();
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
   const tab: Tab = tabParam && TAB_KEYS.has(tabParam) ? (tabParam as Tab) : 'guides';
@@ -75,6 +63,7 @@ export function Study({ apps, onOpenTerminal }: { apps: Application[]; onOpenTer
 
   return (
     <div>
+      {matcha && <MatchaPageHead eyebrow="Pipeline" title="Study" />}
       <TabStrip
         items={TABS}
         active={tab}
@@ -109,6 +98,7 @@ function SkillGuides() {
   const [data, setData] = useState<StudyData | null>(null);
   const [upskillReport, setUpskillReport] = useState<UpskillReport | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const matcha = useMatcha();
 
   useEffect(() => {
     let alive = true;
@@ -208,16 +198,19 @@ function SkillGuides() {
         </section>
       )}
 
-      <div className="space-y-6">
-        {data.guides.map((guide) => (
-          <GuideCard
-            key={guide.file}
-            guide={guide}
-            progress={data.progress[guide.file]}
-            gap={gapLinkageFor(guide.file, upskillReport)}
-            onUpdate={(patch) => updateProgress(guide.file, patch)}
-          />
-        ))}
+      <div className={matcha ? 'mx-gguides grid gap-5 md:grid-cols-2 xl:grid-cols-3' : 'space-y-6'}>
+        {data.guides.map((guide) => {
+          const Card = matcha ? MatchaGuideCard : GuideCard;
+          return (
+            <Card
+              key={guide.file}
+              guide={guide}
+              progress={data.progress[guide.file]}
+              gap={gapLinkageFor(guide.file, upskillReport)}
+              onUpdate={(patch) => updateProgress(guide.file, patch)}
+            />
+          );
+        })}
       </div>
     </div>
   );
@@ -234,32 +227,7 @@ function GuideCard({
   gap: ReturnType<typeof gapLinkageFor>;
   onUpdate: (patch: Partial<StudyGuideProgress>) => void;
 }) {
-  const [revealed, setRevealed] = useState<Set<number>>(new Set());
-  const [copied, setCopied] = useState(false);
-  const complete = studyGuideComplete(progress);
-  const readiness = guideReadiness(progress);
-
-  const toggleReveal = (i: number) =>
-    setRevealed((prev) => {
-      const next = new Set(prev);
-      next.has(i) ? next.delete(i) : next.add(i);
-      return next;
-    });
-
-  const suggestedEntry =
-    `Add my completed self-directed training to Candidate Key Facts.md: "${guide.title}" ` +
-    `— a one-day hands-on introduction, completed ${new Date().toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}. ` +
-    `Word it as self-directed training under "Self-directed training (Aug 2026)", not as professional or administration experience — ` +
-    `same honesty standard as the rest of the file. If this ever needs an evidence-map state on a job analysis, it's ` +
-    `needs-wording, not verified — a one-day crash course backs a claim of exposure, not of work-history experience.`;
-
-  const copySuggestion = async () => {
-    const ok = await copyText(suggestedEntry);
-    if (ok) {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2200);
-    }
-  };
+  const { revealed, toggleReveal, copied, copySuggestion, complete, readiness } = useGuideCard(guide, progress);
 
   return (
     <section className="panel px-5 py-4">

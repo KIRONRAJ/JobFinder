@@ -6,6 +6,146 @@ Recorded from the built surface (**23 Aug 2026 Bauhaus redesign**,
 superseding "Ops console, warmed" below), not from intention. If code and
 this file disagree, the code is the truth and this file is stale.
 
+## Matcha Ops (17-18 Oct 2026) — the default theme
+
+**Matcha is now what a visitor with no saved theme sees** (v7.0.0). Bauhaus, Pulse
+and Cyber still exist and are unchanged; a browser that saved one keeps it. The
+sections below this one describe the Bauhaus foundation, which the other three themes
+still use. Where the two disagree about colour, type or shape, **this section wins for
+Matcha**. If code and this file disagree, the code is the truth.
+
+### How it is built
+
+- A fourth `data-theme` (`matcha`) with its own CSS variables (RGB triplets) in
+  `src/index.css`, light on `[data-theme='matcha']` and dark on
+  `.dark[data-theme='matcha']`. The pre-paint script in `index.html` and `App.tsx` resolve
+  "nothing saved" to Matcha, so there is no flash.
+- Matcha CSS is appended at the end of `index.css` and is **unlayered on purpose**:
+  the Bauhaus shape (hard shadow, 2px border) is baked in as Tailwind utilities that
+  beat `@layer components`. Every selector starts with `[data-theme='matcha']`.
+  Do not write a utility class name in a hand-written selector (Tailwind rewrites it
+  inside any rule that `@apply`s it); use attribute selectors or an `mx-*` marker class.
+- Matcha-only layouts are gated by `useMatcha()` (`src/lib/useMatcha.ts`, reads
+  `data-theme` with a `MutationObserver`). Other themes render the old trees untouched.
+- No server code, no data file and no handler changed. Every Matcha component takes the same
+  props, setters and URL state the old one used.
+
+### Type
+
+- **Matcha Style** (`public/fonts/MatchaStyle.woff2`, ttf fallback) is for display headings
+  and big numerals only, via the `mx-display-*` / `mx-numeral-*` classes. It lacks `·`,
+  dashes, arrows, check marks and Latin Extended-A letters (e.g. the macron in "Ātea").
+  `lib/matchaGlyphs.ts` (`fitsMatchaStyle`) guards every dynamic title: a name with a
+  missing glyph falls back to the body font.
+- **Instrument Sans Variable** is the body font (`@fontsource-variable/instrument-sans`,
+  scoped to Matcha, so other themes never download it). **JetBrains Mono** is the `mx-mono`
+  label. Outfit remains the other themes' body font.
+
+### Tokens
+
+| Token | Light | Dark |
+| --- | --- | --- |
+| `--canvas` | #f6f4ec | #0d0f0b |
+| `--panel` | #ffffff | #151812 |
+| `--panel-2` | #edeadd | #1c2017 |
+| `--ink` | #16190f | #eceae0 |
+| `--ink-soft` | #4e5242 | #a3a794 |
+| `--ink-faint` | #646852 | #8a8f7c |
+| `--line` | #c4c1ae | #3a4030 |
+| `--line-soft` | #dad7c8 | #2a2f23 |
+| `--field-line` (form-control borders only) | #808370 | #686e5c |
+| `--accent` | #3f6b00 | #c6f04d |
+| `--on-accent` | #f6f4ec | #10140a |
+| `--applied` | #08644a | #5fd4b0 |
+| `--amber` | #875a00 | #f2b84b |
+| `--rose` | #ba3326 | #f0766b |
+| `--grass` | #157a40 | #85d664 |
+| `--neutral` | #4e5242 | #a3a794 |
+
+Status hues are fixed meanings in every theme and every status carries an icon plus its
+text, never colour alone. `--field-line`, `--ink-faint`, `--applied` and `--amber` were
+raised in the accessibility pass (below).
+
+### Matcha-only components (`src/components/matcha/`)
+
+`MatchaLogin`, `MatchaHome` (dashboard), `MatchaPageHeader` (slim header: breadcrumb,
+command box, Gmail, Terminal, light/dark, primary action), `MatchaPageHead` (eyebrow and
+Matcha Style title), `MatchaToolbar` (one-row applications toolbar), `MatchaRoleDetail`
+(tabbed role page, tab in the URL hash), `MatchaOutreachCard` (Direct approach and
+Recruiters cards), `MatchaAgendaGrid` (month grid), `MatchaInsightsHero` (funnel bar list
+and response tiles), `MatchaGuideCard` (Study skill guides), `MatchaAppearance` (header
+popover: dark mode, background photo, photo dim; same handlers and storage keys as Settings).
+Shared logic they reuse:
+`lib/useGuideCard.ts`, `lib/matchaGlyphs.ts`, `lib/useMatcha.ts`, the existing
+`ShowMoreControl` and the `Toggle` switch (moved out of Settings into `components/Toggle.tsx`).
+Shared files with a Matcha branch: `UpcomingStrip` (mounted on the dashboard), `CommandPalette`
+(groups Actions, Go to, Roles, plus an Esc/Enter footer), `AppCard` (44px tap area on the +N chip
+at phone width), `Sidebar` (88px collapsed rail), `MobileNav`, `Badges`,
+`Settings`, `OutreachView`, `BoardView`, `AnalyticsView`, `AgendaView`, `Study`,
+`PageHeader` (exports `heroFor` and `useGoHome`), `MiniApp` (drawn icons).
+Plus the Summer of Tech pages (`.mx-sot` wrapper, Tailwind red scale read as the accent)
+and the command palette (sentence-case rows).
+
+### Accessibility results (WCAG AA, Matcha light and dark)
+
+Computed-colour audit over 20 views at 1440px, animations frozen:
+
+| Check | Before | After |
+| --- | --- | --- |
+| Text below 4.5:1 (3:1 large) | dark 69, light 30 | 0 (out-of-month Agenda day numbers fixed in the follow-up) |
+| Form-control border vs surface (needs 3:1) | 1.55 to 1.81 | light 3.2 to 3.9, dark 3.1 to 3.6 |
+| Focus ring | 2px accent outline on every Tab stop | unchanged |
+| Tap targets at 390px | 0 undersized (hidden 1x1 checkboxes excluded, their labels are 44px) | unchanged |
+| Sideways scroll at 390px | none | none |
+
+Token changes: dark `--ink-faint` 4.2-4.5 to 5.0-5.4; light `--ink-faint` 4.3 to 4.7; light
+`--applied` Applied pill 3.7-4.0 to 5.0; light `--amber` Interview pill 4.4 to 4.8.
+Scoped rules: dimmed tab counts and sub-labels restored, white text on lime uses
+`--on-accent`, light red/green/blue chip text mapped to rose/applied/blue, palette "Live"
+chip, light "ACTIVE" chip, and the `/miniapp` Today badge (its `bg-amber-500` class does
+not exist, so the digit was white on white in light mode; fixed under Matcha only).
+Agenda cell labels name the item kinds ("4 items: 4 closing dates").
+
+### Accepted baselines
+
+`npm run check:type` = **152** existing arbitrary `text-[Npx]` sizes with an identical list
+(no new ones allowed). `npm test` = **210 of 210** (the old Spark NZ failure was fixed by
+Antigravity in `04c7a48`; the redesign never touched it). `check:data` counts the live
+applications (239 at the start of the run, more as roles are added).
+
+### Open items
+
+- Agenda dots on busy days are colour only inside the cell; the label now names the kinds
+  and the day list names every item.
+- Not built from the mock-ups, by rule: placeholder cards, slogans and invented figures;
+  palette rows the app does not have ("Check Gmail", "Log a role") and the mock's "Page"
+  tags; the modals keep their existing layout.
+- Bauhaus, Pulse and Cyber keep their emoji (status pills, hover emoji, splash, favicon);
+  Matcha uses drawn icons. `/miniapp` keeps its other emoji.
+- The Cyber theme's pre-paint gap (no attribute set before paint) is unchanged.
+
+### Follow-up items (18 Oct 2026), all done and merged
+
+- Agenda: out-of-month day numbers are 12px regular in `--ink-faint`, 5.2 to 5.8:1 (was about 2:1).
+- Command palette search input: inset 1px `--field-line` ring, 3.4 to 3.9:1, header height unchanged.
+- Command palette regrouping: Actions, Go to, Pipeline Quick Filters, Roles, Jump to section, with an
+  Esc and Enter footer. Same 38 rows, handlers and search results. Matcha only.
+- Appearance popover in the header (`MatchaAppearance`): reuses the Settings handlers and storage keys,
+  closes on Esc and outside click, focus returns to the button, works at 390px.
+- Upcoming strip: `UpcomingStrip` mounted on the dashboard, one `GET /api/events` per dashboard
+  mount (no polling), empty state "Nothing in the next 48 hours.", never an error flash.
+- Slim rail: collapsed sidebar is the 88px rail (logo tile, 48px icons), expanded stays the default,
+  saved in `sidebar_collapsed` with try/catch, desktop only.
+- Tap target: the dashboard "+N" overflow chip has an invisible 44px hit area at 390px (no visual change).
+
+### Rollout and rollback
+
+Every phase and step has a tag (`redesign-p1-start` to `redesign-p5-docs-start`, and
+`redesign-p5-<step>-done`), a copy of `dist` and `data` under `App/.redesign-checkpoints/`
+and the previous build in `App/dist.*prev`. UI rollback is `mv dist dist.bad && mv
+dist.prev dist`. The step-by-step log is `docs/redesign/matcha-ops/ROLLOUT-LOG.md`; the
+safety protocol is `docs/walkthroughs/matcha-ops-redesign-rollout.md`.
+
 ## Second pass (23 Aug 2026, same day) — migration finished, motion, emoji
 
 Three things, in order of blast radius.
@@ -85,7 +225,7 @@ visually verified — the browser window wouldn't reflow to a phone width.
 adapted from a supplied Bauhaus design-system prompt (source: a public
 "Design Style: Bauhaus" spec — geometric primitives, primary-colour
 blocking, hard offset shadows, Outfit typeface). Scope was explicitly
-phased, confirmed with Jordan before building:
+phased, confirmed with Kironraj before building:
 
 - **Foundation (app-wide):** every colour token, the sans font (Outfit,
   replacing Inter), `.section-label`, and the three button classes
@@ -107,7 +247,7 @@ phased, confirmed with Jordan before building:
   used the shared classes, and should be moved onto them rather than
   hand-restyled.
 
-Four scope decisions Jordan made before this was built, load-bearing for
+Four scope decisions Kironraj made before this was built, load-bearing for
 anything that extends it:
 1. **Dark mode kept**, not dropped — the spec is light-only; a dark variant
    was designed to match (off-black canvas, light-grey borders instead of
@@ -334,7 +474,7 @@ animation on the value made exactly the changed numbers render mid-fade.
 - Arrow-key navigation through the list; Escape closes every overlay.
 - Icon-only controls carry `aria-label` and `aria-pressed` where they toggle.
 - All text meets 4.5:1 in both themes, including meta text and the accent
-  button's label.
+  button's label. (Bauhaus-era claim; for Matcha see the audit table in "Matcha Ops" above.)
 
 ## Conventions
 

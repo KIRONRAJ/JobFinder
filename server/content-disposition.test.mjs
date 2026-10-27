@@ -5,7 +5,7 @@ import { contentDispositionHeader } from './content-disposition.js';
 
 test('content-disposition: filename with an en dash does not throw when set as a real header (regression — this exact filename 500\'d the PDF preview)', () => {
   const filename =
-    'CV - Nichecom (2026) Limited - Sales and Support Engineer – Telecommunication and Timing.pdf';
+    'CV - Example Telecom (2026) Limited - Sales and Support Engineer – Telecommunication and Timing.pdf';
   const res = new http.ServerResponse({});
   assert.doesNotThrow(() => {
     res.setHeader('Content-Disposition', contentDispositionHeader('inline', filename));

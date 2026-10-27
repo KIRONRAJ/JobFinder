@@ -76,7 +76,7 @@ export function AnalysisView({ apps }: { apps: Application[] }) {
             No analysis yet
           </p>
           <p className="mt-1 text-micro text-ink-soft">
-            Ask Claude in chat — e.g. “run an ATS and gap analysis on the Docuvera role”.
+            Ask Claude in chat — e.g. “run an ATS and gap analysis on the Acme role”.
           </p>
           <ul className="mt-3 space-y-1.5">
             {pending.map((a) => (

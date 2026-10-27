@@ -55,7 +55,7 @@ function isHttpUrl(text: string): boolean {
  *
  * Also surfaces whatever's sitting in App/requests/ (queued CV/CL drafts and
  * deletes) with a one-click "Process pending" trigger — the manual equivalent
- * of the on-demand loop described in the jobhq skill, for when Jordan wants
+ * of the on-demand loop described in the jobhq skill, for when Kironraj wants
  * it processed now instead of waiting until he's next in chat.
  */
 export function TerminalPanel({

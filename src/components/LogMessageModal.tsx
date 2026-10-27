@@ -22,10 +22,109 @@ export function LogMessageModal({ open, onClose, app, onSaveNotes }: Props) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Smart Parse State
+  const [showSmartPaste, setShowSmartPaste] = useState(false);
+  const [rawText, setRawText] = useState('');
+  const [parsedBadge, setParsedBadge] = useState<string | null>(null);
+
+  const handleParseRaw = (textToParse: string) => {
+    if (!textToParse.trim()) return;
+    let extractedSender = '';
+    let extractedSubject = '';
+    let extractedDate = '';
+    const bodyLines: string[] = [];
+    const lines = textToParse.split(/\r?\n/);
+    let inHeader = true;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (inHeader) {
+        const fromM = line.match(/^From:\s*(.+)$/i);
+        const subjM = line.match(/^Subject:\s*(.+)$/i);
+        const dateM = line.match(/^(?:Date|Sent):\s*(.+)$/i);
+
+        if (fromM) {
+          extractedSender = fromM[1].trim();
+        } else if (subjM) {
+          extractedSubject = subjM[1].trim();
+        } else if (dateM) {
+          extractedDate = dateM[1].trim();
+        } else if (line.trim() === '' && (extractedSender || extractedSubject)) {
+          inHeader = false;
+        } else if (!fromM && !subjM && !dateM && i > 5) {
+          inHeader = false;
+          bodyLines.push(line);
+        }
+      } else {
+        bodyLines.push(line);
+      }
+    }
+
+    if (extractedSender) setSender(extractedSender);
+    if (extractedSubject) setSubject(extractedSubject);
+    if (extractedDate) {
+      try {
+        const parsed = new Date(extractedDate);
+        if (!isNaN(parsed.getTime())) {
+          const yr = parsed.getFullYear();
+          const mo = String(parsed.getMonth() + 1).padStart(2, '0');
+          const da = String(parsed.getDate()).padStart(2, '0');
+          const hr = String(parsed.getHours()).padStart(2, '0');
+          const mi = String(parsed.getMinutes()).padStart(2, '0');
+          setDate(`${yr}-${mo}-${da} ${hr}:${mi}`);
+        } else {
+          setDate(extractedDate);
+        }
+      } catch {
+        setDate(extractedDate);
+      }
+    }
+
+    const cleanBody = bodyLines.join('\n').trim() || textToParse.trim();
+    setBody(cleanBody);
+
+    // Intent detection
+    const lower = textToParse.toLowerCase();
+    if (
+      lower.includes('interview') ||
+      lower.includes('teams meeting') ||
+      lower.includes('zoom') ||
+      lower.includes('assessment centre')
+    ) {
+      setParsedBadge('🎯 Interview / Assessment signal detected');
+    } else if (
+      lower.includes('unfortunately') ||
+      lower.includes('not to proceed') ||
+      lower.includes('other candidate')
+    ) {
+      setParsedBadge('⚠️ Rejection signal detected');
+    } else {
+      setParsedBadge('✓ Extracted headers & body cleanly');
+    }
+    playSound('tick');
+  };
+
+  const handlePasteClipboard = async () => {
+    try {
+      if (navigator.clipboard?.readText) {
+        const text = await navigator.clipboard.readText();
+        if (text) {
+          setRawText(text);
+          handleParseRaw(text);
+        }
+      }
+    } catch {
+      // Browser permissions fallback
+    }
+  };
+
   // Initialize defaults on open
   useEffect(() => {
     if (open) {
       setType('received');
+      setShowSmartPaste(false);
+      setRawText('');
+      setParsedBadge(null);
       // Format current NZ timestamp: YYYY-MM-DD HH:mm
       const now = new Date();
       const yr = now.getFullYear();
@@ -153,6 +252,55 @@ export function LogMessageModal({ open, onClose, app, onSaveNotes }: Props) {
                 {error}
               </div>
             )}
+
+            {/* Smart Parse Raw Email Box */}
+            <div className="rounded-2xl border border-line bg-panel-2/30 p-3.5 space-y-2">
+              <div className="flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => setShowSmartPaste((v) => !v)}
+                  className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-accent hover:underline focus:outline-none"
+                >
+                  <Icon.Sparkles className="h-3.5 w-3.5" />
+                  <span>{showSmartPaste ? 'Hide Quick-Paste' : '⚡ Quick-Paste & Parse Raw Email'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handlePasteClipboard}
+                  className="inline-flex items-center gap-1 rounded-full border border-line bg-panel px-2.5 py-0.5 text-[11px] font-mono text-ink-soft hover:text-ink hover:border-accent shadow-xs"
+                >
+                  <Icon.Copy className="h-3 w-3" />
+                  <span>Paste Clipboard</span>
+                </button>
+              </div>
+
+              {showSmartPaste && (
+                <div className="space-y-2 pt-1">
+                  <textarea
+                    value={rawText}
+                    onChange={(e) => {
+                      setRawText(e.target.value);
+                      handleParseRaw(e.target.value);
+                    }}
+                    placeholder="Paste entire email with headers (From: ..., Date: ..., Subject: ..., message body)..."
+                    rows={4}
+                    className="w-full rounded-xl bg-panel border border-line p-2.5 text-xs font-mono text-ink placeholder:text-ink-faint focus:outline-none focus:ring-1 focus:ring-accent"
+                  />
+                  {parsedBadge && (
+                    <div className="flex items-center justify-between text-[11px] font-mono font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-2.5 py-1">
+                      <span>{parsedBadge}</span>
+                      <button
+                        type="button"
+                        onClick={() => setShowSmartPaste(false)}
+                        className="text-ink-soft hover:text-ink underline text-[10px]"
+                      >
+                        Done
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
 
             {/* Type selector */}
             <div className="space-y-1.5">

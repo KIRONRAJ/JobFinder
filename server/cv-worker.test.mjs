@@ -56,7 +56,7 @@ test('generateTailoredDocSpec: parses Gemini response into valid doc spec', asyn
     workHistory: [
       {
         role: 'L2 NOC Engineer',
-        company: 'Northline Broadband Pvt Limited',
+        company: 'Northline Broadband',
         period: '11/2017 – 06/2019 | Thrissur, Kerala',
         bullets: ['Monitored network telemetry']
       }
@@ -74,7 +74,7 @@ test('generateTailoredDocSpec: parses Gemini response into valid doc spec', asyn
       addressee: 'Hiring Manager\nAcme Corp\nWellington',
       greeting: 'Dear Hiring Team,',
       paragraphs: [
-        'I am writing to express my strong interest in the Systems Support Specialist position at Acme Corp. Living locally in Petone, Lower Hutt, and holding a Master of Information Technology completed with Merit from Riverside Institute of Technology, Wellington, I bring authentic Tier 1 and Tier 2 operations experience.',
+        'I am writing to express my strong interest in the Systems Support Specialist position at Acme Corp. Living locally in Petone, Upper Hutt, and holding a Master of Information Technology completed with Merit from Riverside Institute of Technology, Wellington, I bring authentic Tier 1 and Tier 2 operations experience.',
         'Throughout my career at Northline Broadband and Cascade Infovision, I have managed high-reliability environments, investigated complex anomalies, and provided empathetic support under strict response SLAs.',
         'I hold full open work rights on a 3-year Post Study Work Visa (Open Work Visa) and a full clean New Zealand driver licence. I am eager to contribute to Acme Corp.'
       ],
@@ -107,7 +107,7 @@ test('generateTailoredDocSpec: parses Gemini response into valid doc spec', asyn
 
     assert.equal(spec.company, 'Acme Corp');
     assert.equal(spec.role, 'Systems Support Specialist');
-    assert.equal(spec.outputDir, path.join('Pending to Apply', 'Acme Corp'));
+    assert.equal(spec.outputDir, 'Pending to Apply/Acme Corp');
     assert.ok(spec.coverLetter);
     assert.equal(spec.coverLetter.greeting, 'Dear Hiring Team,');
     assert.equal(spec.coverLetter.signoff, 'Sincerely,\nJordan Smith');
@@ -216,7 +216,7 @@ test('processSingleCvRequest: executes end-to-end flow and updates data & audit 
     const entry = updatedApps.find((a) => a.id === 'app_unit_001');
     assert.equal(entry.cvStatus, 'drafted');
     assert.equal(entry.cover, 'draft');
-    assert.equal(entry.folderPath, path.join('Pending to Apply', 'TestCo'));
+    assert.equal(entry.folderPath, 'Pending to Apply/TestCo');
 
     // Verify audit log has cv-generated event
     const auditContent = await fsPromises.readFile(auditFile, 'utf8');
@@ -267,5 +267,104 @@ test('generateTailoredDocSpec: falls back to Pending to Apply when folderPath is
       apiKey: 'K',
     });
     assert.equal(spec.outputDir, 'Pending to Apply/Acme Ltd', `should reject ${JSON.stringify(folderPath)}`);
+  }
+});
+
+// The deterministic engine (scripts/cv_engine.py) means a CV no longer needs a
+// model: when the LLM is down but the ad text is saved on the entry, the worker
+// still builds the CV from the evidence bank and skips only the cover letter.
+test('processSingleCvRequest: builds the CV deterministically when the LLM fails', async () => {
+  const tmpDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'cv-worker-test-'));
+  const requestsDir = path.join(tmpDir, 'requests');
+  const dataFile = path.join(tmpDir, 'applications.json');
+  const auditFile = path.join(tmpDir, 'audit-log.jsonl');
+  await fsPromises.mkdir(requestsDir, { recursive: true });
+  await fsPromises.writeFile(dataFile, JSON.stringify([{
+    id: 'app_unit_002', company: 'Acme', role: 'Coordinator', matchKey: 'acme-coordinator',
+    status: 'researching', cvStatus: 'queued', folderPath: '', cover: 'none',
+    jobText: 'Incident management and time management. '.repeat(20),
+  }]), 'utf8');
+  const reqFile = path.join(requestsDir, 'cv_request__acme-coordinator__1.json');
+  await fsPromises.writeFile(reqFile, JSON.stringify({ type: 'cv_request', id: 'app_unit_002', link: '' }), 'utf8');
+
+  const calls = [];
+  const mockExecFile = (cmd, args, opts, cb) => { calls.push(args.join(' ')); cb(null, 'ok', ''); };
+  try {
+    const result = await processSingleCvRequest(reqFile, {
+      requestsDir, dataFile, auditFile, generatorScript: 'mock-generator.py', apiKey: '',
+      execFileImpl: mockExecFile,
+      generate: async () => { throw new Error('quota exhausted'); },
+    });
+    assert.ok(result);
+    assert.ok(calls.some((c) => c.includes('cv_engine.py build') && c.includes('--merge')), calls.join('\n'));
+    assert.ok(calls.some((c) => c.includes('mock-generator.py') && c.includes('--cv-only')), calls.join('\n'));
+    const entry = JSON.parse(await fsPromises.readFile(dataFile, 'utf8'))[0];
+    assert.equal(entry.cvStatus, 'drafted');
+    assert.equal(entry.cover, 'none', 'no cover letter was written, so cover state must not claim a draft');
+    assert.equal(entry.folderPath, 'Pending to Apply/Acme');
+    // The missing cover letter is flagged honestly and the request re-queued.
+    const audit = await fsPromises.readFile(auditFile, 'utf8');
+    assert.match(audit, /cover letter NOT generated.*retry 1\/3/);
+    const requeued = JSON.parse(await fsPromises.readFile(reqFile, 'utf8'));
+    assert.equal(requeued.retries, 1);
+    assert.ok(requeued.retryAfter > Date.now());
+    // Still backing off: a second pass is a no-op.
+    assert.equal(await processSingleCvRequest(reqFile, { requestsDir, dataFile, auditFile, execFileImpl: mockExecFile }), null);
+  } finally {
+    await fsPromises.rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
+// A failing request used to stay in requests/ and be retried every 10s poll,
+// calling Gemini each time. The honesty gate (verify-docs FAILs unevidenced
+// claims) makes failures more likely, so a failed request is parked instead.
+test('processPendingCvRequests: parks a failed request instead of retrying it forever', async () => {
+  const tmpDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'cv-worker-test-'));
+  const requestsDir = path.join(tmpDir, 'requests');
+  const dataFile = path.join(tmpDir, 'applications.json');
+  await fsPromises.mkdir(requestsDir, { recursive: true });
+  await fsPromises.writeFile(dataFile, JSON.stringify([{ id: 'app_unit_003', company: 'Acme', role: 'X' }]), 'utf8');
+  await fsPromises.writeFile(path.join(requestsDir, 'cv_request__acme-x__1.json'), JSON.stringify({ id: 'app_unit_003' }), 'utf8');
+  try {
+    await processPendingCvRequests({
+      requestsDir, dataFile, auditFile: path.join(tmpDir, 'audit.jsonl'), apiKey: '',
+      execFileImpl: (cmd, args, opts, cb) => cb(null, 'ok', ''),
+      generate: async () => { throw new Error('quota exhausted'); },
+    });
+    const files = await fsPromises.readdir(requestsDir);
+    assert.deepEqual(files, ['cv_failed__acme-x__1.json']);
+  } finally {
+    await fsPromises.rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('processSingleCvRequest: fires onGenerated for a normal run, but not for a review regeneration (which passes reviewFeedback through)', async () => {
+  const tmpDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'cv-worker-hook-'));
+  const dataFile = path.join(tmpDir, 'applications.json');
+  const auditFile = path.join(tmpDir, 'audit-log.jsonl');
+  await fsPromises.writeFile(dataFile, JSON.stringify([{ id: 'a1', company: 'Co', role: 'R', matchKey: 'co-r', cvStatus: 'queued', folderPath: '' }]), 'utf8');
+  const seen = [];
+  const generate = async (args) => {
+    seen.push(args.reviewFeedback);
+    return { company: 'Co', role: 'R', outputDir: 'Pending to Apply/Co' };
+  };
+  const hooked = [];
+  const run = async (extra) => {
+    const reqFile = path.join(tmpDir, `req_${hooked.length}_${Math.random()}.json`);
+    await fsPromises.writeFile(reqFile, JSON.stringify({ id: 'a1', matchKey: 'co-r', company: 'Co', role: 'R', ...extra }), 'utf8');
+    await processSingleCvRequest(reqFile, {
+      requestsDir: tmpDir, dataFile, auditFile, generate, generatorScript: 'x.py', apiKey: 'k',
+      execFileImpl: (_c, _a, _o, cb) => cb(null, 'ok', ''),
+      onGenerated: (e) => hooked.push(e.id),
+    });
+  };
+  try {
+    await run({});
+    assert.deepEqual(hooked, ['a1']);
+    await run({ reviewFeedback: '- fix IAM' });
+    assert.deepEqual(hooked, ['a1']);
+    assert.deepEqual(seen, [undefined, '- fix IAM']);
+  } finally {
+    await fsPromises.rm(tmpDir, { recursive: true, force: true });
   }
 });

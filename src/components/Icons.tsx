@@ -69,6 +69,10 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   ChevronLeft,
+  ChevronRight,
+  SkipForward,
+  Mic,
+  MicOff,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -132,6 +136,7 @@ export const Icon = {
   Chevron: make(ChevronDown, 'w-4 h-4'),
   Sort: make(ChevronsUpDown, 'w-4 h-4'),
   Withdrawn: make(CircleMinus, 'w-3 h-3'),
+  Skipped: make(SkipForward, 'w-3 h-3'),
   Zap: make(Zap, 'w-4 h-4'),
   Gauge: make(Gauge, 'w-3.5 h-3.5'),
   Target: make(Target, 'w-4 h-4'),
@@ -163,5 +168,8 @@ export const Icon = {
   SidebarClose: make(PanelLeftClose, 'w-4 h-4'),
   SidebarOpen: make(PanelLeftOpen, 'w-4 h-4'),
   ChevronLeft: make(ChevronLeft, 'w-4 h-4'),
+  ChevronRight: make(ChevronRight, 'w-4 h-4'),
+  Mic: make(Mic, 'w-4 h-4'),
+  MicOff: make(MicOff, 'w-4 h-4'),
   Gmail: GmailLogo,
 };

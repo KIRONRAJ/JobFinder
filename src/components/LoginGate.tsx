@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, setUnauthorizedHandler } from '../api';
+import { api, setUnauthorizedHandler, setTelegramInitData, getTelegramInitData } from '../api';
 import { Icon } from './Icons';
+import { MatchaLogin } from './matcha/MatchaLogin';
+import { useMatcha } from '../lib/useMatcha';
 
 /**
  * Gates the whole app behind a single shared password — no accounts, this is
@@ -15,9 +17,32 @@ export function LoginGate({ children }: { children: React.ReactNode }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const matcha = useMatcha();
 
   useEffect(() => {
-    setUnauthorizedHandler(() => setAuthenticated(false));
+    setUnauthorizedHandler(() => {
+      if (!getTelegramInitData()) {
+        setAuthenticated(false);
+      }
+    });
+
+    const initData = getTelegramInitData();
+    if (initData) {
+      setTelegramInitData(initData);
+      api
+        .telegramAuth(initData)
+        .then((res) => {
+          if (res.ok) {
+            setAuthenticated(true);
+            return;
+          }
+          return api.session().then((s) => setAuthenticated(s.authenticated));
+        })
+        .catch(() => api.session().then((s) => setAuthenticated(s.authenticated)))
+        .finally(() => setChecking(false));
+      return () => setUnauthorizedHandler(null);
+    }
+
     api
       .session()
       .then((s) => setAuthenticated(s.authenticated))
@@ -46,7 +71,29 @@ export function LoginGate({ children }: { children: React.ReactNode }) {
     }
   };
 
-  if (checking) return null;
+  if (checking) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="flex flex-col items-center gap-3 text-ink-soft">
+          <Icon.Refresh className="h-6 w-6 animate-spin text-accent" />
+          <p className="text-xs">Loading JobSearchHQ…</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!authenticated && matcha) {
+    return (
+      <MatchaLogin
+        password={password}
+        onPassword={setPassword}
+        onSubmit={submit}
+        submitting={submitting}
+        error={error}
+        inputRef={inputRef}
+      />
+    );
+  }
 
   if (!authenticated) {
     return (

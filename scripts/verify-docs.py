@@ -26,6 +26,12 @@ import subprocess
 import sys
 import zipfile
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import docnames  # noqa: E402  (filename rules, same folder)
+import cv_engine  # noqa: E402  (same folder; stdlib-only apart from pdffonts)
+
+ATS_TARGET = 80
+
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 APPLICATIONS = os.path.join(ROOT, "App", "data", "applications.json")
 
@@ -175,9 +181,17 @@ def find_docs(folder, role=None):
         if len(candidates) <= 1:
             return candidates[0] if candidates else None
         if role:
-            matches = [c for c in candidates if role.lower() in os.path.basename(c).lower()]
-            if len(matches) == 1:
-                return matches[0]
+            # Score by how many words of the role appear in the filename, so a
+            # folder holding "Service Desk Analyst" and "Service Desk Analyst level 1
+            # Support" still resolves to the right pair. Company-only names (no role
+            # tag, set 14 Oct 2026) score 0 and fall through to the last candidate.
+            words = [w for w in re.findall(r"[a-z0-9]+", role.lower())]
+            def score(c):
+                name = os.path.basename(c).lower()
+                return sum(1 for w in words if w in re.findall(r"[a-z0-9]+", name))
+            scored = sorted(((score(c), c) for c in candidates), reverse=True)
+            if scored[0][0] > 0 and (len(scored) == 1 or scored[0][0] > scored[1][0]):
+                return scored[0][1]
         return candidates[-1]
 
     return pick(cv_pdfs), pick(cv_docxs), pick(cl_docxs)
@@ -218,7 +232,226 @@ def check_pii(rep, label, text):
         rep.ok("%s PII scrub" % label)
 
 
-def verify(folder, keywords, role=None):
+DANGLING_WORDS = r"(a|an|the)"
+DANGLING_PUNCT_RE = re.compile(r"\b%s[ \t]*[.,](?:\s|$)" % DANGLING_WORDS, re.I)
+DANGLING_EOP_RE = re.compile(r"\b%s\s*\n" % DANGLING_WORDS, re.I)
+
+
+def check_dangling(rep, label, punct_text, eop_text=""):
+    hits = set(m.group(1).lower() for m in DANGLING_PUNCT_RE.finditer(punct_text))
+    hits |= set(m.group(1).lower() for m in DANGLING_EOP_RE.finditer(eop_text))
+    if hits:
+        rep.fail("%s unfinished sentence" % label, "dangling word before a break: " + ", ".join(sorted(hits)))
+    else:
+        rep.ok("%s unfinished sentence" % label)
+
+
+FORBIDDEN_HOBBY_PATTERNS = [
+    ("photography", r"\bphotograph(?:y|er)\b"),
+    ("hiking/tramping", r"\b(?:hiking|tramping|backpacking)\b"),
+    ("cooking/baking", r"\b(?:cooking|baking)\b"),
+    ("gardening", r"\bgardening\b"),
+    ("cycling/biking", r"\b(?:cycling|mountain\s+biking)\b"),
+    ("kayaking/fishing/camping", r"\b(?:kayaking|fishing|camping)\b"),
+]
+
+MAORI_GREETING_SIGNOFF_PATTERNS = [
+    ("Māori greeting", r"\b(?:kia\s*ora|t[eē]n[aā]\s*(?:koe|koutou))\b"),
+    ("Māori signoff", r"\bng[aā]\s*mihi(?:\s*nui)?\b"),
+]
+
+CLEARANCE_OVERCLAIM_PATTERNS = [
+    ("active clearance", r"\bactive\s+(?:security\s+)?clearance\b"),
+    ("secret clearance", r"\b(?:currently\s+cleared|hold(?:s|ing)?\s+a\s+(?:secret|top\s+secret)|top\s+secret(?:\s+clearance)?|secret\s+clearance|TS/SCI)\b"),
+]
+
+SERVICENOW_PATTERN = re.compile(r"\bservicenow\b", re.I)
+
+DRIVER_LICENCE_RE = re.compile(
+    r"full\s+clean\s+new\s+zealand\s+class\s+1\s+driver\s+licen[cs]e\s+and\s+personal\s+vehicle",
+    re.I
+)
+
+
+def check_semantic_guardrails(rep, label, text, is_cv=False):
+    hobby_hits = [name for name, pat in FORBIDDEN_HOBBY_PATTERNS if re.search(pat, text, re.I)]
+    if hobby_hits:
+        rep.fail("%s leisure hobbies" % label, "Rule 7 violation - found: " + ", ".join(hobby_hits))
+    else:
+        rep.ok("%s leisure hobbies" % label)
+
+    lang_hits = [name for name, pat in MAORI_GREETING_SIGNOFF_PATTERNS if re.search(pat, text, re.I)]
+    if lang_hits:
+        rep.fail("%s language standard" % label, "Rule 5 violation - found: " + ", ".join(lang_hits))
+    else:
+        rep.ok("%s language standard" % label)
+
+    clr_hits = [name for name, pat in CLEARANCE_OVERCLAIM_PATTERNS if re.search(pat, text, re.I)]
+    if clr_hits:
+        rep.fail("%s clearance claims" % label, "found overstated clearance: " + ", ".join(clr_hits))
+    else:
+        rep.ok("%s clearance claims" % label)
+
+    if SERVICENOW_PATTERN.search(text):
+        rep.fail("%s ServiceNow check" % label, "prohibited self-study tool mentioned")
+    else:
+        rep.ok("%s ServiceNow check" % label)
+
+    if is_cv:
+        if DRIVER_LICENCE_RE.search(text):
+            rep.ok("CV Driver Licence line", "Class 1 licence present")
+        else:
+            rep.fail("CV Driver Licence line", "Rule 8 violation - missing 'Full clean New Zealand Class 1 Driver Licence and personal vehicle.'")
+
+
+# -----------------------------------------------------------------------------
+# AI TELLS & SLOP PATTERNS (SlopMonster, Humanizer, Detection Research)
+# -----------------------------------------------------------------------------
+AI_BANNED_VOCAB = [
+    ("delve", r"\bdelv(?:e|es|ed|ing)\b"),
+    ("tapestry", r"\btapestr(?:y|ies)\b"),
+    ("testament", r"\btestament\b"),
+    ("pivotal", r"\bpivotal\b"),
+    ("seamless", r"\bseamless(?:ly)?\b"),
+    ("robust", r"\brobust\b"),
+    ("leverage", r"\bleverag(?:e|es|ed|ing)\b"),
+    ("elevate", r"\belevat(?:e|es|ed|ing)\b"),
+    ("unlock/unleash", r"\b(?:unlock|unleash)(?:s|ed|ing)?\b"),
+    ("harness", r"\bharness(?:ing)?(?:\s+the\s+power)?\b"),
+    ("holistic", r"\bholistic\b"),
+    ("transformative", r"\btransformative\b"),
+    ("foster/cultivate", r"\b(?:foster|cultivat)(?:e|es|ed|ing)\b"),
+    ("supercharge", r"\b(?:supercharg|turbocharg)(?:e|es|ed|ing)\b"),
+    ("game-changer", r"\bgame[- ]chang(?:er|ing)\b"),
+    ("paradigm", r"\bparadigm(?:s)?\b"),
+    ("synergy", r"\bsynerg(?:y|ies)\b"),
+    ("bespoke", r"\bbespoke\b"),
+    ("meticulous", r"\bmeticulous(?:ly)?\b"),
+    ("interplay", r"\binterplay\b"),
+    ("beacon", r"\bbeacon\b"),
+    ("myriad/plethora", r"\b(?:myriad|plethora)\b"),
+    ("fast-paced", r"\bfast[- ]paced\b"),
+    ("spearhead", r"\bspearhead(?:ed|ing|s)?\b"),
+]
+
+AI_CONSTRUCTION_PATTERNS = [
+    ("not just X but Y", r"\bnot\s+(?:just|only)\b[^,.!?]{2,60}[,.]\s*(?:but|it['’]s|they|we|i\b)"),
+    ("more than just", r"\bmore\s+than\s+just\b"),
+    ("in todays world", r"\bin\s+today['’]s\s+(?:world|landscape|market|environment)\b"),
+    ("throat-clearing opener", r"\b(?:when\s+it\s+comes\s+to|it\s+is\s+(?:worth|important\s+to)\s+(?:noting|note|understand)|needless\s+to\s+say|at\s+the\s+end\s+of\s+the\s+day)\b"),
+    ("fake significance", r"\b(?:stands\s+as\s+a|serves\s+as\s+a\s+testament|marks\s+a\s+pivotal|leaves\s+an\s+indelible)\b"),
+    ("em-dash tell", r"—"),
+    # 9 Oct 2026: a cover letter passed this gate clean but still scored 40-76% on external
+    # AI detectors (Kironraj flagged it). These two are the specific tells he pointed to -
+    # self-referential meta-commentary ("is [not] something I've/I'm...") instead of a plain
+    # statement, and the stock chatbot-letter closer. Neither is banned vocabulary, but both
+    # are templated constructions a person drafting their own letter doesn't reach for.
+    ("meta self-reference", r"\bis\s+(?:not\s+)?something\s+i(?:'ve|'m|\s+(?:have|am))\b"),
+    ("stock closer", r"\bi(?:'d|\s+would)\s+welcome\s+the\s+chance\s+to\s+talk\s+this\s+through\b"),
+]
+
+
+def check_ai_tells(rep, label, text):
+    vocab_hits = [name for name, pat in AI_BANNED_VOCAB if re.search(pat, text, re.I)]
+    if vocab_hits:
+        rep.fail("%s AI vocabulary tell" % label, "banned AI word(s): " + ", ".join(vocab_hits))
+    else:
+        rep.ok("%s AI vocabulary tell" % label)
+
+    struct_hits = [name for name, pat in AI_CONSTRUCTION_PATTERNS if re.search(pat, text, re.I)]
+    if struct_hits:
+        rep.fail("%s AI structural pattern" % label, "found AI tell pattern: " + ", ".join(struct_hits))
+    else:
+        rep.ok("%s AI structural pattern" % label)
+
+
+# 1 Oct 2026 (recruiter review): laptop/mobile support and password resets are toEvidence, not confirmed; the letter
+# claimed them while the CV omitted them. Extend this list whenever Key Facts marks a skill unconfirmed.
+# Claim boundary. Added 30 Sep 2026 after the reviewer caught unsupported claims in the
+# two earlier letters: business-continuity work, SOP authoring, team leadership,
+# and silence about an ad's Microsoft/RMM stack. None of these are in Candidate Key Facts;
+# an ad asking for them is a gap to name, never a claim to echo back. Both documents.
+UNSUPPORTED_CLAIM_PATTERNS = [
+    ("business continuity", r"business[- ]continuity"),
+    ("SOP / procedure authoring", r"\bSOPs?\b|standard operating procedures?"),
+    ("team leadership", r"\b(team[- ]lead(?:er)?|line[- ]manag\w*|people[- ]manag\w*|senior (?:on-?site )?presence)\b"),
+    ("team leadership", r"\b(?:led|lead(?:ing)?|supervis\w+|mentor\w+|coach\w+|manag\w+|guid\w+|allocat\w+ work (?:to|for))\s+(?:a |the |our |local |wider )*(?:small )?(?:team|staff|engineers|juniors?)\b"),
+    ("mentoring / onboarding", r"\bmentoring\b|\bonboarding\b"),
+    ("ticket-queue ownership", r"\b(?:managed|owned|ran|led|supervised|prioriti[sz]ed|allocated)\s+(?:the\s+)?(?:daily\s+)?(?:ticket\s+)?queue"),
+    ("guarantee wording", r"\bguarantee\w*"),
+    ("end-user device support (laptops/mobiles)", r"\b(?:laptops?|mobile (?:devices?|phones?)|smartphones?|tablets?|end[- ]user (?:devices?|hardware))\b"),
+    # 1 Oct 2026 (Fujitsu On-Site Technician review): the letter inferred IAM and hardware/warranty skill from the
+    # Master's and the 2017 ECE degree. A degree is never evidence of practised skill; cite coursework as coursework.
+    ("degree-derived competence claim", r"\b(?:strong|solid|natural|deep|good)\s+(?:conceptual\s+)?(?:foundation|familiarity|grounding)\s+(?:in|with|of)\b"),
+    ("identity and access management", r"identity (?:and|&) access management(?! concepts)|\bIAM\b"),
+    ("hardware / warranty / device configuration", r"\bwarrant(?:y|ies)\b|hardware (?:diagnostics?|repairs?|faults?|swaps?)|device (?:configuration|imaging|enrol?lment)"),
+    ("password resets / account admin", r"password[- ]resets?|reset(?:ting)? (?:user )?passwords?|account (?:unlock|provisioning)|user (?:account )?(?:creation|provisioning)|joiners?,? movers?"),
+]
+# Tools the record does not support. Fine only inside a sentence that admits the gap.
+UNCONFIRMED_STACK = re.compile(
+    r"\b(microsoft 365|m365|office 365|o365|intune|azure|sharepoint|entra|active directory|autotask|exchange online|mdm|rmm)\b", re.I)
+GAP_WORDS = re.compile(
+    r"\b(rather than|not yet|yet to|build\w*|learn\w*|develop\w*|grow\w*|without|new to|unfamiliar|gap|self-study|no prior|limited)\b", re.I)
+
+
+def _without_confirmed_bullets(text):
+    """CV bullets that appear word for word in cv-evidence.json were confirmed by Jordan (12 Oct 2026:
+    trained new starters, guided juniors, covered for a lead at Northline). The patterns below predate
+    that confirmation, so they must not flag these exact lines. Anything reworded still gets checked."""
+    # Referees' own job titles ("Team Lead") are not claims about Kironraj, so the References block is not scanned.
+    text = re.split(r"(?im)^\s*references\s*$", text, maxsplit=1)[0]
+    flat = re.sub(r"\s+", " ", text)
+    try:
+        ev = cv_engine.load(cv_engine.EVIDENCE)
+        for role in ev.get("roles", []):
+            for b in role.get("bullets", []):
+                flat = flat.replace(re.sub(r"\s+", " ", b["text"]), " ")
+    except Exception:
+        pass
+    return flat
+
+
+def check_claim_boundary(rep, label, text, is_cv=False):
+    if is_cv:
+        text = _without_confirmed_bullets(text)
+    hits = sorted({n for n, pat in UNSUPPORTED_CLAIM_PATTERNS if re.search(pat, text, re.I)})
+    if hits:
+        rep.fail("%s claim boundary" % label, "unsupported claim(s) not in Candidate Key Facts: " + ", ".join(hits))
+    else:
+        rep.ok("%s claim boundary" % label)
+    stack = []
+    for sent in re.split(r"(?<=[.!?])\s+|\n", text):
+        m = UNCONFIRMED_STACK.search(sent)
+        if m and (is_cv or not GAP_WORDS.search(sent)):
+            stack.append(m.group(0))
+    if stack:
+        rep.fail("%s unconfirmed tooling" % label,
+                 "%s named as if held; the record has no hands-on evidence. On a cover letter, name it only "
+                 "as a gap ('rather than', 'build toward')" % ", ".join(sorted(set(stack), key=str.lower)))
+    else:
+        rep.ok("%s unconfirmed tooling" % label)
+
+
+def check_evidence(rep, cv_text):
+    """Every lexicon skill on the CV must be provable from cv-evidence.json, and employer
+    job titles must be the real ones. Catches LLM-drafted CVs too (Zendesk/Jira/CIMS and
+    'Operations & Network Incident Coordinator' on the 25 Sep 2026 draft)."""
+    lex, ev = cv_engine.load(cv_engine.LEXICON), cv_engine.load(cv_engine.EVIDENCE)
+    hard, soft = cv_engine.unevidenced(cv_text, lex, ev)
+    if hard:
+        rep.fail("CV unevidenced claims", "not in cv-evidence.json: " + ", ".join(hard))
+    else:
+        rep.ok("CV unevidenced claims")
+    if soft:
+        rep.warn("CV unevidenced soft skills", ", ".join(soft) + " (add to claims once Jordan confirms)")
+    titles = cv_engine.title_violations(cv_text, ev)
+    if titles:
+        rep.fail("CV job titles", "; ".join(titles))
+    else:
+        rep.ok("CV job titles", "match the evidence bank")
+
+
+def verify(folder, keywords, role=None, cv_only=False, job_text=""):
     rep = Report()
     cv_pdf, cv_docx, cl_docx = find_docs(folder, role)
 
@@ -250,9 +483,16 @@ def verify(folder, keywords, role=None):
         else:
             rep.ok("CV text layer", "%d chars extracted" % len(cv_text.strip()))
             check_pii(rep, "CV", cv_text)
+            check_dangling(rep, "CV", cv_text, docx_text(cv_docx) if cv_docx else "")
+            check_semantic_guardrails(rep, "CV", cv_text, is_cv=True)
+            check_ai_tells(rep, "CV", cv_text)
+            check_claim_boundary(rep, "CV", cv_text, is_cv=True)
+            check_evidence(rep, cv_text)
 
     cl_text = ""
-    if not cl_docx:
+    if cv_only:
+        pass
+    elif not cl_docx:
         rep.fail("Cover letter present", "no 'Cover Letter - *.docx' in %s" % folder)
     else:
         cl_text = docx_text(cl_docx)
@@ -265,6 +505,10 @@ def verify(folder, keywords, role=None):
         else:
             rep.ok("Cover letter length", "%d words" % words)
         check_pii(rep, "Cover letter", cl_text)
+        check_dangling(rep, "Cover letter", cl_text, cl_text)
+        check_semantic_guardrails(rep, "Cover letter", cl_text, is_cv=False)
+        check_ai_tells(rep, "Cover letter", cl_text)
+        check_claim_boundary(rep, "Cover letter", cl_text)
 
     # The visa is the one fact stated in both documents, so it's the one that
     # drifts. A reviewer pass caught it worded two ways in the same application.
@@ -282,7 +526,7 @@ def verify(folder, keywords, role=None):
     # A keyword written into the docx but absent from the extracted text is a
     # formatting regression (a run split across a style boundary), not a
     # content problem — worth surfacing, not worth failing the build over.
-    if keywords and cv_text:
+    if keywords and cv_text and not job_text:   # superseded by the local ATS score when the ad is saved
         low = cv_text.lower()
         literal = [k for k in keywords if is_literal_term(k)]
         skipped = len(keywords) - len(literal)
@@ -295,6 +539,16 @@ def verify(folder, keywords, role=None):
         else:
             rep.warn("ATS keywords in PDF text", "no literal terms to check%s" % note)
 
+    if job_text and cv_text:
+        kws = cv_engine.extract(job_text, cv_engine.load(cv_engine.LEXICON))
+        s = cv_engine.score_all(kws, cv_text, role or "", cv_pdf, cv_docx)
+        detail = "overall %d (hard %s, soft %s, search %s, format %s)" % (
+            s["overall"], s["hard"], s["soft"], s["search"], s["format"])
+        if s["overall"] >= ATS_TARGET:
+            rep.ok("Local ATS score", detail + (("; missing: " + ", ".join(s["missing"])) if s["missing"] else ""))
+        else:
+            rep.warn("Local ATS score", detail + "; below %d, missing: %s" % (ATS_TARGET, ", ".join(s["missing"])))
+
     return rep
 
 
@@ -303,11 +557,14 @@ def main():
     ap.add_argument("--match-key", help="matchKey (or id) in applications.json")
     ap.add_argument("--folder", help="folder to check, relative to 'Career and Job' or absolute")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
+    ap.add_argument("--role", help="role title, to pick the right files when a folder holds several")
+    ap.add_argument("--cv-only", action="store_true", help="skip cover-letter checks (deterministic no-LLM path)")
     args = ap.parse_args()
 
     folder = args.folder
     keywords = []
-    role = None
+    role = args.role
+    job_text = ""
     if args.match_key:
         entry = entry_for(args.match_key)
         if not entry:
@@ -315,6 +572,7 @@ def main():
             return 2
         folder = folder or entry.get("folderPath") or ""
         role = entry.get("role")
+        job_text = entry.get("jobText") or ""
         ats = (entry.get("analysis") or {}).get("ats") or {}
         keywords = list(ats.get("matched") or []) + list(ats.get("toEvidence") or [])
     if not folder:
@@ -325,7 +583,7 @@ def main():
         print("no such folder: %s" % folder, file=sys.stderr)
         return 2
 
-    rep = verify(folder, keywords, role)
+    rep = verify(folder, keywords, role, args.cv_only, job_text)
     if args.json:
         print(json.dumps({"folder": folder, "pass": not rep.failed, "checks": rep.checks}, indent=2))
     else:
@@ -337,3 +595,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+

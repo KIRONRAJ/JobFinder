@@ -46,9 +46,10 @@ export async function generateContent({
 
   for (const model of models) {
     try {
-      const response = await fetchImpl(`${ENDPOINT}/${model}:generateContent?key=${apiKey}`, {
+      const response = await fetchImpl(`${ENDPOINT}/${model}:generateContent`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        // Header, not ?key=: a URL ends up in logs and error messages.
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
         body,
       });
 

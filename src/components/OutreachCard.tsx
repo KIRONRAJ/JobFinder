@@ -58,6 +58,18 @@ export function OutreachCard({
                 Site
               </a>
             )}
+            {entry.portalUrl && !entry.registered && (
+              <a
+                href={entry.portalUrl}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="link-quiet"
+                title={entry.portalUrl}
+              >
+                <Icon.External className="h-3.5 w-3.5" />
+                Register
+              </a>
+            )}
           </div>
           {(entry.whatTheyDo || entry.location) && (
             <p className="mt-1 text-meta text-ink-soft">

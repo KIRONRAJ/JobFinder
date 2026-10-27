@@ -1,6 +1,8 @@
 import { useSearchParams } from 'react-router-dom';
 import { Icon } from '../components/Icons';
 import { TabStrip } from '../components/TabStrip';
+import { MatchaPageHead } from '../components/matcha/MatchaPageHead';
+import { useMatcha } from '../lib/useMatcha';
 import { AnalyticsView } from '../components/AnalyticsView';
 import { AnalysisView } from '../components/AnalysisView';
 import { MarketView } from '../components/MarketView';
@@ -33,6 +35,7 @@ interface Props {
  * rendered in its old standalone view.
  */
 export function Insights({ apps, onOpenTerminal }: Props) {
+  const matcha = useMatcha();
   const [searchParams, setSearchParams] = useSearchParams();
   const tab: Tab = (searchParams.get('tab') as Tab) || 'pipeline';
 
@@ -49,6 +52,7 @@ export function Insights({ apps, onOpenTerminal }: Props) {
 
   return (
     <div>
+      {matcha && <MatchaPageHead eyebrow="Pipeline" title="Insights" />}
       <TabStrip
         items={TABS}
         active={tab}

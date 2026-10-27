@@ -14,6 +14,13 @@
 
 import fsPromises from 'node:fs/promises';
 import path from 'node:path';
+import dns from 'node:dns';
+import net from 'node:net';
+
+try {
+  dns.setDefaultResultOrder?.('ipv4first');
+  net.setDefaultAutoSelectFamily?.(false);
+} catch {}
 
 const API_ROOT = 'https://api.telegram.org';
 const DEFAULT_TIMEOUT_MS = 15_000;

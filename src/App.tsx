@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { gsap, useGSAP, prefersReducedMotion } from './lib/gsapSetup';
 import { useFlipList } from './lib/useFlipList';
 import { playSound, setSoundEnabled, type SoundKind } from './lib/sound';
@@ -10,6 +10,7 @@ import {
   Routes,
   useLocation,
   useNavigate,
+  useNavigationType,
   useSearchParams,
 } from 'react-router-dom';
 import { api } from './api';
@@ -25,26 +26,27 @@ import {
 import { Icon } from './components/Icons';
 import { Pipeline } from './components/Pipeline';
 import { AppCard } from './components/AppCard';
+import { ShowMoreControl } from './components/ShowMoreControl';
 import { TagBadge } from './components/Badges';
 import { Toaster, type ToastMsg } from './components/Toast';
 import { Sidebar, VIEW_META } from './components/Sidebar';
 import { MobileNav } from './components/MobileNav';
-import { CommandCentre } from './components/CommandCentre';
-import { InterviewBanner } from './components/InterviewBanner';
-import { EventsBanner } from './components/EventsBanner';
+import { TodayFocus } from './components/dashboard/TodayFocus';
+import { DashboardHero } from './components/dashboard/DashboardHero';
+import { MatchaHome } from './components/matcha/MatchaHome';
+import { MatchaToolbar } from './components/matcha/MatchaToolbar';
+import { MatchaPageHeader } from './components/matcha/MatchaPageHeader';
 import { LoginGate } from './components/LoginGate';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { PageHeader } from './components/PageHeader';
 import { Wallpaper } from './components/Wallpaper';
-import { DeadlineCountdown } from './components/DeadlineCountdown';
 import { SkeletonRows, SkeletonPanels } from './components/SkeletonRows';
-import { DashboardSkeleton } from './components/DashboardSkeleton';
-import { HomeDashboard } from './components/dashboard/HomeDashboard';
-import { KineticLoader } from './components/dashboard/KineticLoader';
 import { AppDataProvider, useAppData } from './state/AppDataProvider';
 import { LegacyViewRedirect } from './routes/LegacyViewRedirect';
 import { pathToView, viewToPath } from './routes/viewRoutes';
 import type { VisualTheme } from './components/ThemeSelector';
+import { MiniApp } from './routes/MiniApp';
+import { scrollToTop, scrollToY } from './lib/lenis';
 
 // Lazy-loaded routes and heavy modals with auto-retry on stale chunk deployment (v5.1.5 / v5.2.0)
 function lazyWithRetry<T extends React.ComponentType<any>>(
@@ -58,10 +60,10 @@ function lazyWithRetry<T extends React.ComponentType<any>>(
       return mod;
     } catch (err: any) {
       const isChunkError =
-        err?.message?.includes('dynamically imported module') ||
-        err?.message?.includes('Failed to fetch') ||
-        err?.name === 'TypeError';
-      if (!hasRefreshed && isChunkError) {
+        err?.name === 'ChunkLoadError' ||
+        err?.message?.includes('Failed to fetch dynamically imported module') ||
+        err?.message?.includes('error loading dynamically imported module');
+      if (isChunkError && !hasRefreshed) {
         sessionStorage.setItem('chunk_load_retried', 'true');
         window.location.reload();
         return new Promise<{ default: T }>(() => {});
@@ -72,6 +74,7 @@ function lazyWithRetry<T extends React.ComponentType<any>>(
 }
 
 const RoleDetail = lazyWithRetry(() => import('./routes/RoleDetail').then((m) => ({ default: m.RoleDetail })));
+const Radar = lazyWithRetry(() => import('./routes/Radar').then((m) => ({ default: m.Radar })));
 const Insights = lazyWithRetry(() => import('./routes/Insights').then((m) => ({ default: m.Insights })));
 const Study = lazyWithRetry(() => import('./routes/Study').then((m) => ({ default: m.Study })));
 const Settings = lazyWithRetry(() => import('./routes/Settings').then((m) => ({ default: m.Settings })));
@@ -90,6 +93,7 @@ const CommandPalette = lazyWithRetry(() => import('./components/CommandPalette')
 const Celebration = lazyWithRetry(() => import('./components/Celebration').then((m) => ({ default: m.Celebration })));
 const OutreachView = lazyWithRetry(() => import('./components/OutreachView').then((m) => ({ default: m.OutreachView })));
 const AgendaView = lazyWithRetry(() => import('./components/AgendaView').then((m) => ({ default: m.AgendaView })));
+const FollowUpModal = lazyWithRetry(() => import('./components/FollowUpModal').then((m) => ({ default: m.FollowUpModal })));
 
 function Dashboard() {
   const {
@@ -123,12 +127,12 @@ function Dashboard() {
     return window.matchMedia('(prefers-color-scheme: dark)').matches;
   });
   // Visual theme (genjutsu:paint, 30 Aug 2026) — separate from light/dark:
-  // Bauhaus stays the default, Pulse is opt-in, chosen from Settings →
-  // Appearance. 'bauhaus' stores as no attribute at all so an old
-  // localStorage value (or none) still resolves to the current default.
+  // Matcha is the default (17 Oct 2026); a visitor who already saved Bauhaus,
+  // Pulse or Cyber keeps it. Chosen from Settings → Appearance. 'bauhaus'
+  // stores as no attribute at all.
   const [theme, setTheme] = useState<VisualTheme>(() => {
     const v = localStorage.getItem('visual_theme');
-    return v === 'pulse' ? 'pulse' : v === 'cyber' ? 'cyber' : 'bauhaus';
+    return v === 'bauhaus' || v === 'pulse' || v === 'cyber' ? v : 'matcha';
   });
   // Daily wallpaper (30 Aug 2026) — a Pexels photo behind the app, swapped
   // once a day server-side. Independent of `theme`: works under either.
@@ -189,32 +193,25 @@ function Dashboard() {
   const setEmploymentF = (v: string) => setParam('employment', v);
   const setTagF = (v: string) => setParam('tag', v);
 
-  // Home mode (v6.2.0 Overview): 'dashboard' (interactive Bento grid) or 'pipeline' (tactical role list)
-  const [homeMode, setHomeModeState] = useState<'dashboard' | 'pipeline'>(() => {
-    const param = searchParams.get('mode');
-    if (param === 'pipeline' || param === 'dashboard') return param;
-    const saved = localStorage.getItem('home_mode_pref');
-    if (saved === 'pipeline' || saved === 'dashboard') return saved;
-    return 'dashboard';
-  });
-  const setHomeMode = useCallback(
-    (mode: 'dashboard' | 'pipeline') => {
-      setHomeModeState(mode);
-      localStorage.setItem('home_mode_pref', mode);
-      setParam('mode', mode === 'dashboard' ? '' : mode);
-    },
-    [setParam]
-  );
-
   // Sidebar collapsed rail mode (desktop)
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(
-    () => typeof window !== 'undefined' && localStorage.getItem('sidebar_collapsed') === 'true'
-  );
+  // Expanded is the default; the choice is remembered, and storage that throws (private mode, blocked data)
+  // only costs the memory, never the toggle.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('sidebar_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
 
   const handleToggleSidebar = useCallback(() => {
     setSidebarCollapsed((prev) => {
       const next = !prev;
-      localStorage.setItem('sidebar_collapsed', String(next));
+      try {
+        localStorage.setItem('sidebar_collapsed', String(next));
+      } catch {
+        /* keep the in-memory state */
+      }
       return next;
     });
   }, []);
@@ -259,14 +256,29 @@ function Dashboard() {
     setParam('sort', v);
   };
 
+  const DEFAULT_LIMIT = 6;
+  const [visibleLimit, setVisibleLimit] = useState<number>(DEFAULT_LIMIT);
+
+  // State: expanded amount is remembered while the user stays on the page and
+  // when switching layouts. Changing the search text or any filter resets it to 6.
+  // Do not persist it in localStorage.
+  const filterKey = `${search}␟${statusF}␟${typeF}␟${employmentF}␟${tagF}`;
+  const prevFilterKey = useRef(filterKey);
+  useEffect(() => {
+    if (prevFilterKey.current !== filterKey) {
+      prevFilterKey.current = filterKey;
+      setVisibleLimit(DEFAULT_LIMIT);
+    }
+  }, [filterKey]);
+
   const [editOpen, setEditOpen] = useState(false);
   const [editing, setEditing] = useState<Application | null>(null);
   const [confirming, setConfirming] = useState<Application | null>(null);
   const [applying, setApplying] = useState<Application | null>(null);
   const [previewingApp, setPreviewingApp] = useState<Application | null>(null);
+  const [followUpApp, setFollowUpApp] = useState<Application | null>(null);
   const [interviewingApp, setInterviewingApp] = useState<Application | null>(null);
   const [terminalOpen, setTerminalOpen] = useState(false);
-  const [replayLoader, setReplayLoader] = useState(false);
   /**
    * The Gmail button runs the check itself — it does not open the terminal.
    *
@@ -416,8 +428,7 @@ function Dashboard() {
   }, [dark]);
 
   useEffect(() => {
-    if (theme === 'pulse') document.documentElement.setAttribute('data-theme', 'pulse');
-    else if (theme === 'cyber') document.documentElement.setAttribute('data-theme', 'cyber');
+    if (theme !== 'bauhaus') document.documentElement.setAttribute('data-theme', theme);
     else document.documentElement.removeAttribute('data-theme');
     localStorage.setItem('visual_theme', theme);
   }, [theme]);
@@ -622,7 +633,12 @@ function Dashboard() {
       .sort(sorters[sort]);
   }, [apps, search, statusF, typeF, employmentF, tagF, layout, sort]);
 
-  useFlipList(cardListRef, filtered);
+  const renderedFiltered = useMemo(
+    () => filtered.slice(0, visibleLimit),
+    [filtered, visibleLimit]
+  );
+
+  useFlipList(cardListRef, renderedFiltered);
 
   useGSAP(
     () => {
@@ -630,7 +646,7 @@ function Dashboard() {
       const reduce = prefersReducedMotion();
       gsap.from(viewFadeRef.current, { opacity: 0, y: 4, duration: reduce ? 0 : 0.18, ease: 'power2.out' });
     },
-    { dependencies: [view, homeMode] }
+    { dependencies: [view] }
   );
 
   const handleExport = async () => {
@@ -658,33 +674,54 @@ function Dashboard() {
     [navigate]
   );
 
+  // One set of header props for both header layouts, so they can never disagree about what a button does.
+  // One handler each, shared by Settings, the sidebar and Matcha's appearance popover.
+  const toggleDark = () => setDark((d) => !d);
+  const toggleWallpaper = () => setWallpaper((w) => !w);
+
+  const headerProps = {
+    view,
+    appCount: apps.length,
+    outreach,
+    pendingCount,
+    onOpenTerminal: () => setTerminalOpen(true),
+    onGmailFetch: handleGmailFetch,
+    onPrimary: isOutreachView(view) ? () => setOutreachAddOpen(true) : openNew,
+    onHome: () => {
+      setView('list');
+      navigate('/');
+      scrollToTop();
+    },
+    sidebarCollapsed,
+    onToggleSidebar: handleToggleSidebar,
+  };
+
   // ---------- render ----------
 
   return (
     <div
       className={`mx-auto grid max-w-[1400px] transition-all duration-200 px-6 pb-32 pt-8 sm:px-10 ${
         sidebarCollapsed
-          ? 'md:grid-cols-[72px_minmax(0,1fr)] gap-x-6'
+          ? theme === 'matcha'
+            ? 'md:grid-cols-[88px_minmax(0,1fr)] gap-x-6'
+            : 'md:grid-cols-[72px_minmax(0,1fr)] gap-x-6'
           : 'md:grid-cols-[220px_minmax(0,1fr)] gap-x-10'
       } md:pb-24 md:pt-0`}
     >
       {wallpaper && <Wallpaper dim={wallpaperDim} />}
-      <PageHeader
-        view={view}
-        appCount={apps.length}
-        outreach={outreach}
-        pendingCount={pendingCount}
-        onOpenTerminal={() => setTerminalOpen(true)}
-        onGmailFetch={handleGmailFetch}
-        onPrimary={isOutreachView(view) ? () => setOutreachAddOpen(true) : openNew}
-        onHome={() => {
-          setView('list');
-          navigate('/');
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }}
-        sidebarCollapsed={sidebarCollapsed}
-        onToggleSidebar={handleToggleSidebar}
-      />
+      {theme === 'matcha' ? (
+        <MatchaPageHeader
+          {...headerProps}
+          dark={dark}
+          onToggleDark={toggleDark}
+          wallpaper={wallpaper}
+          onToggleWallpaper={toggleWallpaper}
+          wallpaperDim={wallpaperDim}
+          onSetWallpaperDim={setWallpaperDim}
+        />
+      ) : (
+        <PageHeader {...headerProps} />
+      )}
 
       <Sidebar
         view={view}
@@ -730,97 +767,43 @@ function Dashboard() {
         </div>
       )}
 
-      {view === 'list' && (
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-black/[0.06] dark:border-white/[0.08] pb-4">
-          <div className="flex items-center gap-1 rounded-full border border-black/[0.08] dark:border-white/[0.1] bg-panel/80 p-1 shadow-[0_2px_12px_rgba(0,0,0,0.03)] backdrop-blur-md">
-            <button
-              type="button"
-              onClick={() => {
-                playSound('tick');
-                setHomeMode('dashboard');
-              }}
-              className={`inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-mono font-bold uppercase tracking-wider transition-all duration-200 ${
-                homeMode === 'dashboard'
-                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-[0_4px_14px_rgba(37,99,235,0.35)] -translate-y-0.5'
-                  : 'text-ink-soft hover:text-ink hover:bg-panel-2/60'
-              }`}
-            >
-              <Icon.Zap className="h-3.5 w-3.5" />
-              <span>Overview</span>
-            </button>
+      {view === 'list' && !loading && (theme === 'matcha' ? <MatchaHome apps={apps} onChanged={refresh} onOpenRole={handleOpenRole} onSchedule={setInterviewingApp} /> : <DashboardHero apps={apps} />)}
 
-            <button
-              type="button"
-              onClick={() => {
-                playSound('tick');
-                setHomeMode('pipeline');
-              }}
-              className={`inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-mono font-bold uppercase tracking-wider transition-all duration-200 ${
-                homeMode === 'pipeline'
-                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-[0_4px_14px_rgba(37,99,235,0.35)] -translate-y-0.5'
-                  : 'text-ink-soft hover:text-ink hover:bg-panel-2/60'
-              }`}
-            >
-              <Icon.Board className="h-3.5 w-3.5" />
-              <span>Pipeline ({apps.length})</span>
-            </button>
-          </div>
+      {view === 'list' && loading && <SkeletonRows />}
 
-          <div className="flex items-center gap-3 text-xs font-mono text-ink-faint">
-            <span
-              className="flex items-center gap-1.5"
-              title={notionError ? `Notion: ${notionError}` : notionOn ? 'Notion mirror active' : 'Notion offline'}
-            >
-              <span className={`h-2 w-2 rounded-full ${notionError ? 'bg-rose-500' : notionOn ? 'bg-emerald-500' : 'bg-neutral'}`} />
-              Notion {notionError ? 'error' : notionOn ? 'synced' : 'not configured'}
-            </span>
-            <span className="hidden sm:inline text-ink-faint/40">·</span>
-            <span className="hidden sm:inline">
-              <kbd className="font-mono text-ink rounded bg-panel-2 px-1.5 py-0.5 text-[11px]">Ctrl+K</kbd> palette
-            </span>
-            <span className="hidden sm:inline text-ink-faint/40">·</span>
-            <span className="hidden sm:inline">
-              <kbd className="font-mono text-ink rounded bg-panel-2 px-1.5 py-0.5 text-[11px]">Ctrl+J</kbd> console
-            </span>
-          </div>
+      {view === 'list' && !loading && theme !== 'matcha' && (
+        <div>
+          <TodayFocus apps={apps} onChanged={refresh} />
         </div>
-      )}
-
-      {view === 'list' && loading && (
-        <DashboardSkeleton />
-      )}
-
-      {view === 'list' && !loading && homeMode === 'pipeline' && (
-        <>
-          <DeadlineCountdown
-            apps={apps}
-            onOpen={handleOpenRole}
-          />
-          <InterviewBanner
-            apps={apps}
-            onOpen={handleOpenRole}
-            onSchedule={(a) => {
-              setInterviewingApp(a);
-            }}
-          />
-          <EventsBanner />
-          <CommandCentre
-            apps={apps}
-            onOpen={handleOpenRole}
-            onOpenTerminal={() => setTerminalOpen(true)}
-            onAutoPicked={refresh}
-          />
-        </>
       )}
 
       {/* Pipeline tabs, search, and this status strip only apply to the role
           list itself — Insights and Agenda both mix every status together by
           construction, so a single-status filter doesn't mean anything there. */}
-      {view === 'list' && !loading && homeMode === 'pipeline' && (
-        <>
-          <Pipeline apps={apps} active={statusF} onPick={setStatusF} />
+      {view === 'list' && !loading && (
+        <div>
+          {theme === 'matcha' && <h2 className="mx-display-md mb-5 font-display-matcha font-normal">Applications</h2>}
+          {theme === 'matcha' && (
+            <MatchaToolbar
+              apps={apps}
+              search={search}
+              onSearch={setSearch}
+              statusF={statusF}
+              onStatus={setStatusF}
+              sort={sort}
+              onSort={setSort}
+              typeF={typeF}
+              onType={setTypeF}
+              employmentF={employmentF}
+              onEmployment={setEmploymentF}
+              tagF={tagF}
+              onTag={setTagF}
+              sotCount={sotCount}
+            />
+          )}
+          {theme !== 'matcha' && <Pipeline apps={apps} active={statusF} onPick={setStatusF} />}
 
-          {layout !== 'board' && (
+          {theme !== 'matcha' && layout !== 'board' && (
             <div className="mb-3 flex flex-wrap items-center gap-2.5">
               <div className="relative min-w-[220px] flex-1">
                 <Icon.Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-faint" />
@@ -846,6 +829,8 @@ function Dashboard() {
                   <img
                     src="/source-logos/sot.svg"
                     alt=""
+                    loading="lazy"
+                    decoding="async"
                     className="h-3.5 w-3.5 object-contain"
                   />
                   <span>Summer of Tech ({sotCount})</span>
@@ -915,7 +900,7 @@ function Dashboard() {
               </button>
             </div>
           </div>
-        </>
+        </div>
       )}
 
       {/* Split here rather than adding cases to the chain below: that chain has
@@ -942,18 +927,22 @@ function Dashboard() {
         <Suspense fallback={<SkeletonPanels />}>
           <Settings
             dark={dark}
-            onToggleDark={() => setDark((d) => !d)}
+            onToggleDark={toggleDark}
             theme={theme}
             onSelectTheme={setTheme}
             wallpaper={wallpaper}
-            onToggleWallpaper={() => setWallpaper((w) => !w)}
+            onToggleWallpaper={toggleWallpaper}
             wallpaperDim={wallpaperDim}
             onSetWallpaperDim={setWallpaperDim}
             sound={sound}
             onToggleSound={() => setSound((s) => !s)}
           />
         </Suspense>
-      ) : loading ? null : view === 'insights' ? (
+      ) : loading ? null : view === 'radar' ? (
+        <Suspense fallback={<SkeletonPanels />}>
+          <Radar toast={toast} onLogged={refresh} />
+        </Suspense>
+      ) : view === 'insights' ? (
         <Suspense fallback={<SkeletonPanels />}>
           <Insights apps={apps} onOpenTerminal={() => setTerminalOpen(true)} />
         </Suspense>
@@ -971,40 +960,6 @@ function Dashboard() {
             toast={toast}
           />
         </Suspense>
-      ) : view === 'list' && homeMode === 'dashboard' ? (
-        <>
-          <KineticLoader
-            forceShow={replayLoader}
-            onComplete={() => setReplayLoader(false)}
-          />
-          <DeadlineCountdown
-            apps={apps}
-            onOpen={handleOpenRole}
-          />
-          <HomeDashboard
-            apps={apps}
-            notionOn={notionOn}
-            notionError={notionError}
-            onOpenApp={handleOpenRole}
-            onAddNew={openNew}
-            onGmailFetch={handleGmailFetch}
-            onOpenTerminal={() => setTerminalOpen(true)}
-            onGoToInsights={() => setView('insights')}
-            onOpenFolder={handleOpenFolder}
-            onSelectStage={(stage) => {
-              setStatusF(stage);
-              setHomeMode('pipeline');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-            onSwitchToPipeline={() => {
-              playSound('tick');
-              setHomeMode('pipeline');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-            onRefresh={refresh}
-            onReplayLoader={() => setReplayLoader(true)}
-          />
-        </>
       ) : filtered.length === 0 ? (
         <div className="panel-empty py-24 text-center">
           {apps.length === 0 ? (
@@ -1026,6 +981,8 @@ function Dashboard() {
         <Suspense fallback={<SkeletonRows />}>
           <BoardView
             apps={filtered}
+            limit={visibleLimit}
+            onLimitChange={(newLimit) => setVisibleLimit(newLimit)}
             onOpen={handleOpenRole}
             onStatusChange={handleStatusChange}
           />
@@ -1035,6 +992,10 @@ function Dashboard() {
           <DenseTableView
             apps={filtered}
             folders={folders}
+            limit={visibleLimit}
+            onShowMore={() => setVisibleLimit((v) => v + DEFAULT_LIMIT)}
+            onShowAll={() => setVisibleLimit(filtered.length)}
+            onShowFewer={() => setVisibleLimit(DEFAULT_LIMIT)}
             onEdit={(a) => {
               setEditing(a);
               setEditOpen(true);
@@ -1069,7 +1030,7 @@ function Dashboard() {
               — see useFlipList.ts for the one simplification that comes with
               it (a removed card just disappears rather than fading out first). */}
           <div ref={cardListRef} className="space-y-3">
-              {filtered.map((a) => (
+              {renderedFiltered.map((a) => (
                 <AppCard
                   key={a.id}
                   app={a}
@@ -1084,11 +1045,21 @@ function Dashboard() {
                   onOpenFolder={() => handleOpenFolder(a)}
                   onMarkApplied={() => setApplying(a)}
                   onPreviewDocs={() => setPreviewingApp(a)}
+                  onFollowUp={() => setFollowUpApp(a)}
                   onSelectTag={setTagF}
                   claudeRunning={claudeRunning}
                 />
               ))}
           </div>
+          {filtered.length > 6 && (
+            <ShowMoreControl
+              total={filtered.length}
+              visible={visibleLimit}
+              onShowMore={() => setVisibleLimit((v) => v + DEFAULT_LIMIT)}
+              onShowAll={() => setVisibleLimit(filtered.length)}
+              onShowFewer={() => setVisibleLimit(DEFAULT_LIMIT)}
+            />
+          )}
         </div>
       )}
       </div>
@@ -1178,6 +1149,21 @@ function Dashboard() {
         </Suspense>
       )}
 
+      {followUpApp && (
+        <Suspense fallback={null}>
+          <FollowUpModal
+            open={Boolean(followUpApp)}
+            app={followUpApp}
+            onClose={() => setFollowUpApp(null)}
+            onSaved={(updated) => {
+              setApps((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
+              refresh();
+            }}
+            toast={toast}
+          />
+        </Suspense>
+      )}
+
       {interviewingApp && (
         <Suspense fallback={null}>
           <InterviewTransitionModal
@@ -1198,7 +1184,7 @@ function Dashboard() {
           onSetView={setView}
           onToggleTheme={() => setDark((d) => !d)}
           onSelectVisualTheme={setTheme}
-          onToggleVisualTheme={() => setTheme((t) => (t === 'bauhaus' ? 'pulse' : t === 'pulse' ? 'cyber' : 'bauhaus'))}
+          onToggleVisualTheme={() => setTheme((t) => (t === 'bauhaus' ? 'pulse' : t === 'pulse' ? 'cyber' : t === 'cyber' ? 'matcha' : 'bauhaus'))}
           sound={sound}
           onToggleSound={() => setSound((s) => !s)}
           onAddNew={openNew}
@@ -1231,11 +1217,39 @@ const RETIRED_REDIRECTS: { from: string; to: string }[] = [
   { from: '/audit', to: '/insights?tab=activity' },
 ];
 
+// Where each history entry was scrolled to, so Back lands where you left.
+const scrollPositions = new Map<string, number>();
+
 function AppRoutes() {
   // Keyed by pathname so navigating to a different page remounts the
   // boundary and clears any caught error automatically — a crash on one
   // role's page shouldn't leave every subsequent page stuck on the fallback.
   const location = useLocation();
+  const navType = useNavigationType();
+  const keyRef = useRef(location.key);
+  useLayoutEffect(() => {
+    keyRef.current = location.key;
+  }, [location.key]);
+  useEffect(() => {
+    const onScroll = () => scrollPositions.set(keyRef.current, window.scrollY);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+  // React Router doesn't reset scroll on client-side navigation, so opening a
+  // role from the bottom of the list landed at the bottom of its page. New
+  // pages start at the top; Back/Forward restore the saved position (retrying
+  // briefly, because the list may still be loading and too short to scroll).
+  // Hash links (section jumps) do their own scrolling in RoleDetail.
+  useEffect(() => {
+    if (location.hash) return;
+    const saved = navType === 'POP' ? scrollPositions.get(location.key) : undefined;
+    if (!saved) {
+      scrollToTop(true);
+      return;
+    }
+    const timers = [0, 120, 350, 800].map((ms) => window.setTimeout(() => scrollToY(saved), ms));
+    return () => timers.forEach(clearTimeout);
+  }, [location.pathname]);
   return (
     <ErrorBoundary key={location.pathname}>
     <Routes>
@@ -1256,6 +1270,10 @@ function AppRoutes() {
           </Suspense>
         }
       />
+      <Route
+        path="/miniapp"
+        element={<MiniApp />}
+      />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
     </ErrorBoundary>
@@ -1263,17 +1281,30 @@ function AppRoutes() {
 }
 
 export default function App() {
+  const isMiniApp =
+    typeof window !== 'undefined' &&
+    (window.location.pathname.startsWith('/miniapp') ||
+      Boolean((window as any).Telegram?.WebApp?.initData) ||
+      window.location.hash.includes('tgWebAppData') ||
+      window.location.search.includes('tgWebAppData'));
+
   return (
     // Future flags opted in now — router behaviour is otherwise identical
     // today, and taking them early avoids a second migration when v7 makes
     // them the default. Silences the two "future flag" console warnings too.
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-      <LoginGate>
-        <AppDataProvider>
-          <LegacyViewRedirect />
-          <AppRoutes />
-        </AppDataProvider>
-      </LoginGate>
+      {isMiniApp ? (
+        <ErrorBoundary>
+          <MiniApp />
+        </ErrorBoundary>
+      ) : (
+        <LoginGate>
+          <AppDataProvider>
+            <LegacyViewRedirect />
+            <AppRoutes />
+          </AppDataProvider>
+        </LoginGate>
+      )}
     </BrowserRouter>
   );
 }

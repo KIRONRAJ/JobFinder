@@ -2,7 +2,8 @@
 // Aggregates deadlines closing within 48h, follow-ups due, tasks due today,
 // and upcoming interviews.
 
-import { sendTelegram } from './notify-telegram.js';
+import { sendTelegram, sendTelegramVoice } from './notify-telegram.js';
+import { getVoiceSetting, createSpokenBriefingText, synthesizeToOggOpus } from './tts.js';
 
 export function formatBriefing(apps, now = new Date()) {
   const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -93,17 +94,22 @@ export function startMorningBriefing({
   token = process.env.TELEGRAM_BOT_TOKEN,
   chatId = process.env.TELEGRAM_CHAT_ID,
   sendTelegramImpl = sendTelegram,
+  sendVoiceImpl = sendTelegramVoice,
   checkIntervalMs = 60_000,
+  nowFn = () => new Date(),
+  synthesizeToOggOpusImpl = synthesizeToOggOpus,
+  getVoiceSettingImpl = getVoiceSetting,
+  createSpokenBriefingTextImpl = createSpokenBriefingText,
 } = {}) {
   if (!token || !chatId) {
     console.log('  telegram briefing: off (no TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID in App/.env)');
-    return;
+    return null;
   }
 
   let lastSentDate = '';
 
   async function checkAndSend() {
-    const now = new Date();
+    const now = nowFn();
     // Weekdays only: Monday = 1, Friday = 5
     const dayOfWeek = now.getDay();
     if (dayOfWeek === 0 || dayOfWeek === 6) return;
@@ -119,16 +125,94 @@ export function startMorningBriefing({
     try {
       const apps = await getApplications();
       const message = formatBriefing(apps, now);
-      await sendTelegramImpl(message, { token, chatId });
+      const res = await sendTelegramImpl(message, { token, chatId });
+      if (res && res.ok === false) {
+        throw new Error(res.error || 'sendTelegram returned failure');
+      }
       lastSentDate = todayDate;
       console.log(`  telegram briefing: morning brief sent for ${todayDate}`);
+
+      // Also synthesize and send spoken audio briefing
+      try {
+        const vSetting = await getVoiceSettingImpl();
+        const spokenScript = createSpokenBriefingTextImpl(apps, now);
+        const { filePath } = await synthesizeToOggOpusImpl(spokenScript, vSetting.voiceKey);
+        await sendVoiceImpl(filePath, {
+          caption: `🎙️ Spoken Morning Briefing (${vSetting.label})`,
+          token,
+          chatId,
+        });
+        console.log(`  telegram briefing: spoken audio note sent for ${todayDate}`);
+      } catch (vErr) {
+        console.error('telegram briefing: spoken voice note failed (text delivered):', vErr.message);
+      }
     } catch (err) {
       console.error('telegram briefing: failed to send morning brief:', err.message);
+      // DO NOT set lastSentDate on failure so the next check within 8:30-8:45 AM retries!
     }
   }
 
   // Initial check
-  checkAndSend();
-  setInterval(checkAndSend, checkIntervalMs);
+  const initialCheck = checkAndSend();
+  const timer = setInterval(checkAndSend, checkIntervalMs);
+  timer.unref();
   console.log('  telegram briefing: on (scheduled weekdays 8:30 AM)');
+  return {
+    checkAndSend,
+    sendNow: () => sendMorningBriefingNow({
+      getApplications,
+      token,
+      chatId,
+      sendTelegramImpl,
+      sendVoiceImpl,
+      synthesizeToOggOpusImpl,
+      getVoiceSettingImpl,
+      createSpokenBriefingTextImpl,
+      now: nowFn(),
+    }),
+    initialCheck,
+    stop: () => clearInterval(timer),
+  };
+}
+
+/**
+ * On-demand or manual trigger to send the daily briefing immediately.
+ */
+export async function sendMorningBriefingNow({
+  getApplications,
+  token = process.env.TELEGRAM_BOT_TOKEN,
+  chatId = process.env.TELEGRAM_CHAT_ID,
+  sendTelegramImpl = sendTelegram,
+  sendVoiceImpl = sendTelegramVoice,
+  synthesizeToOggOpusImpl = synthesizeToOggOpus,
+  getVoiceSettingImpl = getVoiceSetting,
+  createSpokenBriefingTextImpl = createSpokenBriefingText,
+  now = new Date(),
+} = {}) {
+  if (!token || !chatId) {
+    throw new Error('Telegram bot token or chat ID missing');
+  }
+  const apps = await getApplications();
+  const message = formatBriefing(apps, now);
+  const textRes = await sendTelegramImpl(message, { token, chatId });
+  if (textRes && textRes.ok === false) {
+    throw new Error(textRes.error || 'Failed to send text briefing');
+  }
+
+  let voiceSent = false;
+  try {
+    const vSetting = await getVoiceSettingImpl();
+    const spokenScript = createSpokenBriefingTextImpl(apps, now);
+    const { filePath } = await synthesizeToOggOpusImpl(spokenScript, vSetting.voiceKey);
+    const voiceRes = await sendVoiceImpl(filePath, {
+      caption: `🎙️ Spoken Morning Briefing (${vSetting.label})`,
+      token,
+      chatId,
+    });
+    voiceSent = Boolean(voiceRes && voiceRes.ok);
+  } catch (err) {
+    console.error('sendMorningBriefingNow: voice failed:', err.message);
+  }
+
+  return { ok: true, voiceSent };
 }

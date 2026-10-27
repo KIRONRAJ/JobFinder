@@ -12,14 +12,9 @@
 // which would need resolve-then-pin-the-socket. Proportionate for a
 // single-user tool where the caller is already authenticated.
 
-import os from 'node:os';
+const BLOCKED_HOSTNAMES = new Set(['localhost', 'ip6-localhost', 'ip6-loopback', 'homeserver']);
 
-// Block this machine's own hostname alongside the generic loopback names —
-// derived at runtime instead of hardcoded, so the guard travels with whatever
-// box actually runs the server.
-const BLOCKED_HOSTNAMES = new Set(['localhost', 'ip6-localhost', 'ip6-loopback', os.hostname().toLowerCase()]);
-
-function isPrivateIPv4(host) {
+export function isPrivateIPv4(host) {
   const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (!m) return false;
   const [a, b] = m.slice(1).map(Number);
@@ -34,7 +29,7 @@ function isPrivateIPv4(host) {
   return false;
 }
 
-function isPrivateIPv6(host) {
+export function isPrivateIPv6(host) {
   const h = host.replace(/^\[|\]$/g, '').toLowerCase();
   if (h === '::1' || h === '::') return true;
   if (h.startsWith('fe80')) return true; // link-local
@@ -75,6 +70,34 @@ export function assertFetchableUrl(rawUrl) {
     throw new Error(`Refusing to fetch a private address: ${host}`);
   }
   return url;
+}
+
+// curl follows redirects (-L), so a public page can bounce the request to
+// 127.0.0.1, a tailnet host or a file:// URL after the first-hop check above.
+// These args cap and constrain the hops, and the -w trailer reports where the
+// request really ended up so guardCurlOutput() can discard anything fetched from
+// a non-public place. Intermediate hops still receive a GET, but nothing from
+// them is ever returned to the caller.
+const TRAILER = '\n__JOBHQ_FINAL__';
+export const SAFE_CURL_ARGS = [
+  '-s', '-L',
+  '--max-redirs', '3',
+  '--proto', '=http,https',
+  '--proto-redir', '=http,https',
+  '--max-filesize', '5000000',
+  '-w', `${TRAILER}%{url_effective} %{remote_ip}`,
+];
+
+/** Strips the -w trailer; returns '' when the final URL or peer IP is not public. */
+export function guardCurlOutput(stdout) {
+  const text = String(stdout ?? '');
+  const i = text.lastIndexOf(TRAILER);
+  if (i === -1) return text; // no trailer (e.g. a test double): nothing to check
+  const body = text.slice(0, i);
+  const [finalUrl, ip = ''] = text.slice(i + TRAILER.length).trim().split(' ');
+  if (!isFetchableUrl(finalUrl)) return '';
+  if (ip && (isPrivateIPv4(ip) || isPrivateIPv6(ip))) return '';
+  return body;
 }
 
 /** Boolean form, for callers that just want to skip a bad URL silently. */

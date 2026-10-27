@@ -29,15 +29,22 @@ import { WorkHoursTag } from '../components/WorkHoursTag';
 import { EditModal } from '../components/EditModal';
 import { ConfirmDelete } from '../components/ConfirmDelete';
 import { DocumentPreviewModal } from '../components/DocumentPreviewModal';
+import { FollowUpModal } from '../components/FollowUpModal';
 import { TerminalPanel } from '../components/TerminalPanel';
 import { CorrespondenceTimeline } from '../components/CorrespondenceTimeline';
 import { LogMessageModal } from '../components/LogMessageModal';
+import { JobAdPanel } from '../components/JobAdPanel';
+import { TailoringPanel } from '../components/TailoringPanel';
+import { AtsScorePanel } from '../components/AtsScorePanel';
+import { MatchaRoleDetail, type RoleTab } from '../components/matcha/MatchaRoleDetail';
+import { useMatcha } from '../lib/useMatcha';
 import { api } from '../api';
 import { useAppData } from '../state/AppDataProvider';
 import { computeReadiness, isCvActuallyQueued, isCvActuallyDone } from '../lib/readiness';
 import { useClaudeRun } from '../lib/useClaudeRun';
 import { resolveEvidenceMap } from '../lib/evidenceState';
 import type { Application } from '../types';
+import { scrollToEl } from '../lib/lenis';
 
 interface Section {
   id: string;
@@ -54,12 +61,13 @@ interface Section {
  */
 export function RoleDetail() {
   const { id } = useParams<{ id: string }>();
+  const matcha = useMatcha();
   const navigate = useNavigate();
   const location = useLocation();
   // Pipeline filter (status/search/etc.) lives in the list page's URL query
   // string, not app state — so "back to Pipeline" has to be an actual
   // history pop, not a hardcoded link to "/", or it silently drops whatever
-  // tab/filter Jordan was on. location.key === 'default' means this page
+  // tab/filter Kironraj was on. location.key === 'default' means this page
   // was loaded directly (no prior entry in this session) — home is the only
   // sane target then.
   const backToPipeline = () => (location.key === 'default' ? navigate('/') : navigate(-1));
@@ -70,11 +78,14 @@ export function RoleDetail() {
   const [analysisBusy, setAnalysisBusy] = useState(false);
   const [cvBusy, setCvBusy] = useState(false);
   const [skipBusy, setSkipBusy] = useState(false);
+  const [appliedBusy, setAppliedBusy] = useState(false);
+  const [appliedConfirming, setAppliedConfirming] = useState(false);
   const [skipConfirming, setSkipConfirming] = useState(false);
   const [deleteLocalBusy, setDeleteLocalBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [logModalOpen, setLogModalOpen] = useState(false);
+  const [followUpOpen, setFollowUpOpen] = useState(false);
   // Fetch apps + folders again the moment the reviewer's live run ends, so the
   // persisted analysis.review verdict and reviewStatus show up immediately
   // rather than waiting for the next 12s poll.
@@ -109,7 +120,7 @@ export function RoleDetail() {
   useEffect(() => {
     if (!app || !location.hash) return;
     const el = document.getElementById(location.hash.slice(1));
-    el?.scrollIntoView({ block: 'start' });
+    if (el) scrollToEl(el);
   }, [app, location.hash]);
 
   // Must sit above the `!app` early return below — a hook declared after a
@@ -225,10 +236,10 @@ export function RoleDetail() {
     }
   };
 
-  const handleRequestReview = async () => {
+  const handleRequestReview = async (mode: 'review' | 'fix' = 'review') => {
     setActionError(null);
     try {
-      const res = await api.requestReview(app.id);
+      const res = await api.requestReview(app.id, undefined, mode);
       setApps((list) => list.map((a) => (a.id === app.id ? res.entry : a)));
       reviewRun.start(res.runId);
     } catch (err) {
@@ -238,7 +249,10 @@ export function RoleDetail() {
 
   // Two clicks, not a native confirm() — same in-page-confirm convention as
   // the Delete flow, just lightweight since skipping is reversible (Edit ->
-  // change status back) unlike a real delete.
+  // change status back) unlike a real delete. Status 'skipped' (8 Oct 2026),
+  // not 'withdrawn' — this button fires before ever applying, same meaning
+  // as the Telegram "⏭ Skip" button on a freshly-logged role; 'withdrawn' is
+  // reserved for pulling out after actually applying.
   const handleSkipClick = async () => {
     if (!skipConfirming) {
       setSkipConfirming(true);
@@ -248,13 +262,37 @@ export function RoleDetail() {
     setSkipBusy(true);
     setActionError(null);
     try {
-      const updated = await api.update(app.id, { status: 'withdrawn' });
+      const updated = await api.update(app.id, { status: 'skipped' });
       setApps((list) => list.map((a) => (a.id === updated.id ? updated : a)));
       refreshFolders();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
     } finally {
       setSkipBusy(false);
+    }
+  };
+
+  // "Applied" in the header: researching -> applied with today's date (NZ time). The server's
+  // status change moves the folder to Applied/ and starts the follow-up clock, so this only sends
+  // the two fields. Two clicks, same convention as Skip, because it relocates files; Edit reverts it.
+  const handleAppliedClick = async () => {
+    if (!appliedConfirming) {
+      setAppliedConfirming(true);
+      setTimeout(() => setAppliedConfirming(false), 4000);
+      return;
+    }
+    setAppliedConfirming(false);
+    setAppliedBusy(true);
+    setActionError(null);
+    try {
+      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' });
+      const updated = await api.update(app.id, { status: 'applied', date: app.date || today });
+      setApps((list) => list.map((a) => (a.id === updated.id ? updated : a)));
+      refreshFolders();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAppliedBusy(false);
     }
   };
 
@@ -273,6 +311,585 @@ export function RoleDetail() {
       setDeleteLocalBusy(false);
     }
   };
+
+  // Pieces of the page, built once so the classic single-scroll layout below and the Matcha tabbed layout
+  // render exactly the same panels with the same handlers.
+  const readinessBar = (
+<ReadinessBar readiness={readiness} variant="full" />
+  );
+
+  const actionErrorNote = actionError && (
+                <p className="rounded-lg border border-rose/30 bg-rose/[0.06] px-3 py-2 text-micro text-rose">
+                  {actionError}
+                </p>
+              );
+
+  const submissionWarning = app.analysis?.submissionRequirements?.some((r) => !r.done) && (
+                <div className="rounded-2xl border border-rose/30 bg-rose/[0.06] px-4 py-3.5">
+                  <div className="flex items-start gap-2.5">
+                    <Icon.Warning className="mt-0.5 h-4 w-4 shrink-0 text-rose" />
+                    <div className="min-w-0">
+                      <p className="text-meta font-semibold text-rose">
+                        The ad asks for more than a CV and cover letter — don't submit without these
+                      </p>
+                      <ul className="mt-1.5 space-y-1">
+                        {app.analysis.submissionRequirements
+                          .filter((r) => !r.done)
+                          .map((r, i) => (
+                            <li key={i} className="text-micro text-ink-soft">
+                              <span className="text-rose">✕</span> {r.label}
+                              {r.note && <span className="text-ink-faint"> — {r.note}</span>}
+                            </li>
+                          ))}
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              );
+
+  const jobAdPanel = (
+<JobAdPanel app={app} onSaved={(u) => setApps((l) => l.map((a) => (a.id === u.id ? u : a)))} />
+  );
+
+  const fitCheckPrompt = !app.analysis && (
+                <div className="panel-inset flex flex-wrap items-center justify-between gap-3 px-4 py-3.5">
+                  <div>
+                    <p className="text-meta font-medium text-ink">Fit check not run yet</p>
+                    <p className="mt-0.5 text-micro text-ink-faint">
+                      Skills match, gap analysis and an apply/skip verdict.
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleRunAnalysis}
+                    disabled={analysisBusy || app.analysisStatus === 'queued'}
+                    className="btn-primary shrink-0 disabled:opacity-50"
+                  >
+                    <Icon.Target className="h-3.5 w-3.5" />
+                    {app.analysisStatus === 'queued' ? 'Queued…' : 'Run fit check'}
+                  </button>
+                </div>
+              );
+
+  const atsPrompt = app.analysis && !app.analysis.score && (
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line-soft bg-panel-2/40 px-3 py-2.5">
+                  <p className="text-micro text-ink-soft">
+                    Full ATS score not run yet — worth it before drafting a CV, not required before then.
+                  </p>
+                  <button
+                    onClick={handleRunAnalysis}
+                    disabled={analysisBusy || app.analysisStatus === 'queued'}
+                    className="btn-ghost shrink-0 text-micro disabled:opacity-50"
+                  >
+                    <Icon.Target className="h-3.5 w-3.5" />
+                    {app.analysisStatus === 'queued' ? 'Queued…' : 'Run full ATS score'}
+                  </button>
+                </div>
+              );
+
+  const responseTimeline = (
+<ResponseTimeline app={app} />
+  );
+
+  const correspondencePanel = (
+<div className="panel-inset px-5 py-4">
+                <CorrespondenceTimeline
+                  app={app}
+                  onLogMessage={() => setLogModalOpen(true)}
+                />
+              </div>
+  );
+
+  const fitVerdict = app.analysis?.recommendation && (
+                  <FitVerdictBanner
+                    recommendation={app.analysis.recommendation}
+                    onGenerateCv={handleGenerateCv}
+                    onCancelCv={handleCancelCv}
+                    cvBusy={cvBusy}
+                    cvQueued={isCvActuallyQueued(app, folder)}
+                    cvDone={isCvActuallyDone(app, folder)}
+                    onSkip={handleSkipClick}
+                    skipBusy={skipBusy}
+                    skipConfirming={skipConfirming}
+                    onDeleteLocal={handleDeleteLocal}
+                    deleteLocalBusy={deleteLocalBusy}
+                    userFacts={app.userFacts ?? ''}
+                    onSaveFacts={handleSaveFacts}
+                  />
+                );
+
+  const skillsMatch = evidenceItems.length > 0 && <SkillsMatchChart evidenceMap={evidenceMap} />;
+
+  const analysisPanel = app.analysis && (
+<div className="panel-inset px-4 py-4">
+                  <AnalysisPanel analysis={app.analysis} />
+                </div>
+  );
+
+  const tailoring = (
+<TailoringPanel appId={app.id} hasAd={Boolean(app.jobText?.trim())} />
+  );
+
+  const reviewerBlock = app.analysis && isCvActuallyDone(app, folder) && (
+                  <div className="panel-inset space-y-3 px-4 py-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-meta font-medium text-ink">Reviewer critique</p>
+                        <p className="mt-0.5 text-micro text-ink-faint">
+                          Independent second opinion on the generated CV & cover letter — rechecks
+                          the ATS score and fact-checks claims against your real experience.
+                        </p>
+                      </div>
+                      {(app.analysis.review?.issues.length ?? 0) > 0 && (
+                        <button
+                          onClick={() => handleRequestReview('fix')}
+                          disabled={reviewRun.running || app.reviewStatus === 'queued'}
+                          className="btn-ghost shrink-0 text-micro disabled:opacity-50"
+                        >
+                          <Icon.Check className="h-3.5 w-3.5" />
+                          Fix findings
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleRequestReview()}
+                        disabled={reviewRun.running || app.reviewStatus === 'queued'}
+                        className="btn-ghost shrink-0 text-micro disabled:opacity-50"
+                      >
+                        {reviewRun.running || app.reviewStatus === 'queued' ? (
+                          <Icon.Clock className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Icon.Search className="h-3.5 w-3.5" />
+                        )}
+                        {reviewRun.running || app.reviewStatus === 'queued'
+                          ? 'Reviewing…'
+                          : app.analysis.review
+                            ? 'Review again'
+                            : 'Review'}
+                      </button>
+                    </div>
+
+                    {actionError && <p className="text-micro text-rose">{actionError}</p>}
+
+                    {(reviewRun.running || reviewRun.lines.length > 0) && (
+                      <div className="max-h-56 overflow-y-auto rounded-lg bg-canvas px-3 py-2.5 font-mono text-micro leading-relaxed">
+                        {reviewRun.lines.map((l, i) => (
+                          <div
+                            key={i}
+                            className={`whitespace-pre-wrap break-words ${
+                              l.stream === 'err'
+                                ? 'text-rose'
+                                : l.stream === 'meta'
+                                  ? 'text-ink-faint'
+                                  : 'text-ink'
+                            }`}
+                          >
+                            {l.line}
+                          </div>
+                        ))}
+                        {reviewRun.running && (
+                          <span className="inline-block h-3.5 w-1.5 animate-pulse bg-accent align-middle" />
+                        )}
+                      </div>
+                    )}
+                    {reviewRun.error && <p className="text-micro text-rose">{reviewRun.error}</p>}
+
+                    {!reviewRun.running && app.analysis.review && (
+                      <div className="rounded-lg border border-line-soft bg-panel-2/40 px-3 py-2.5">
+                        <p className="text-micro font-medium text-ink">
+                          Last reviewed{' '}
+                          {new Date(app.analysis.review.at).toLocaleDateString(undefined, {
+                            day: 'numeric',
+                            month: 'short',
+                            year: 'numeric',
+                          })}{' '}
+                          ·{' '}
+                          <span
+                            className={
+                              app.analysis.review.verdict === 'clean' ? 'text-grass' : 'text-amber'
+                            }
+                          >
+                            {app.analysis.review.verdict === 'clean' ? 'Clean' : 'Issues found'}
+                          </span>
+                          {!app.analysis.review.atsScoreConfirmed && (
+                            <span className="text-rose"> · ATS score mismatch</span>
+                          )}
+                        </p>
+                        <p className="mt-1 text-micro text-ink-soft">{app.analysis.review.summary}</p>
+                        {app.analysis.review.issues.length > 0 && (
+                          <ul className="mt-1.5 space-y-1">
+                            {app.analysis.review.issues.map((issue, i) => (
+                              <li key={i} className="text-micro text-ink-faint">
+                                · {issue}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+
+  const evidenceBlock = (
+<div className="panel px-5 py-4">
+                <ul className="divide-y divide-line-soft">
+                  {evidenceItems.map(([keyword, item]) => (
+                    <EvidenceRow key={keyword} keyword={keyword} item={item} />
+                  ))}
+                </ul>
+                {!app.evidenceMap && (
+                  <p className="mt-4 border-t border-line-soft pt-3 text-micro text-ink-faint">
+                    Auto-derived from ATS analysis. Ask Claude in chat to refine — attach sources,
+                    mark keywords Jordan can actually back up.
+                  </p>
+                )}
+              </div>
+  );
+
+  const interviewBlock = app.interview ? <InterviewWarRoom app={app} /> : <InterviewPrep app={app} />;
+
+  const rejectionBlock = (
+<RejectionPanel app={app} onSaved={(u) => setApps((l) => l.map((a) => (a.id === u.id ? u : a)))} />
+  );
+
+  const negotiationBlock = (
+<NegotiationPanel app={app} />
+  );
+
+  const historyBlock = (
+<div className="space-y-3">
+              {app.statusHistory && app.statusHistory.length > 1 && (
+                <div className="panel-inset px-4 py-3">
+                  <StatusTimeline history={app.statusHistory} />
+                </div>
+              )}
+              <ActivityTimeline activity={app.activity} />
+            </div>
+  );
+
+  const headerActions = (
+<div className="flex items-center gap-1.5">
+            {(folder?.cv || isCvActuallyDone(app, folder)) && (
+              <button
+                onClick={() => setPreviewOpen(true)}
+                className="btn-primary"
+                title="Preview generated CV and cover letter"
+              >
+                <Icon.Doc className="h-3.5 w-3.5" />
+                Preview CV
+              </button>
+            )}
+            {folder?.studyGuide && (
+              <button
+                onClick={() => setPreviewOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-full border-2 border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-700 dark:text-amber-300 transition hover:bg-amber-500/20 shadow-hardXs"
+                title="View role interview study guide & cheatsheet"
+              >
+                <Icon.GradCap className="h-3.5 w-3.5 text-amber-500" />
+                Study Guide
+              </button>
+            )}
+            {app.status === 'applied' && (
+              <button
+                onClick={() => setFollowUpOpen(true)}
+                className="btn-primary"
+                title="Draft tailored follow-up email"
+              >
+                <Icon.Mail className="h-3.5 w-3.5" />
+                Follow Up
+              </button>
+            )}
+            {app.status === 'researching' && (
+              <button
+                onClick={handleAppliedClick}
+                disabled={appliedBusy}
+                className={appliedConfirming ? 'btn-primary' : 'btn-ghost'}
+                title="Mark as applied today: moves the folder to Applied/ and starts the follow-up clock"
+              >
+                <Icon.Check className="h-3.5 w-3.5" />
+                {appliedBusy ? 'Saving…' : appliedConfirming ? 'Confirm applied' : 'Applied'}
+              </button>
+            )}
+            <button onClick={() => setEditOpen(true)} className="btn-ghost">
+              <Icon.Edit className="h-3.5 w-3.5" />
+              Edit
+            </button>
+            {app.folderPath && (
+              <button
+                onClick={openFolder}
+                disabled={folder?.exists === false}
+                title={folder?.exists === false ? "Folder doesn't exist yet" : 'Open in File Explorer'}
+                className="btn-ghost disabled:opacity-40"
+              >
+                <Icon.Folder className="h-3.5 w-3.5" />
+                Folder
+              </button>
+            )}
+            {app.link && (
+              <a href={app.link} target="_blank" rel="noopener noreferrer" className="btn-ghost">
+                <Icon.External className="h-3.5 w-3.5" />
+                Job ad
+              </a>
+            )}
+            {app.links?.map((l) => (
+              <a key={l.url} href={l.url} target="_blank" rel="noopener noreferrer" className="btn-ghost">
+                <Icon.External className="h-3.5 w-3.5" />
+                {l.label}
+              </a>
+            ))}
+          </div>
+  );
+
+  const railFacts = (
+<>
+<div className="panel-inset px-4 py-3.5">
+            <p className="section-label mb-2.5">Details</p>
+            <dl className="space-y-2 text-meta">
+              {app.date && (
+                <Fact label="Applied">{app.date}</Fact>
+              )}
+              {app.deadline && (
+                <Fact label="Closes">
+                  <DeadlineTag app={app} />
+                </Fact>
+              )}
+              {app.followUpDue && (
+                <Fact label="Follow up">
+                  <FollowUpTag app={app} />
+                </Fact>
+              )}
+              {app.salary && (
+                <Fact label="Salary">
+                  <SalaryTag app={app} />
+                </Fact>
+              )}
+              {app.workArrangement && (
+                <Fact label="Arrangement">
+                  <ArrangementTag app={app} />
+                </Fact>
+              )}
+              {app.workHours && (
+                <Fact label="Hours">
+                  <WorkHoursTag app={app} />
+                </Fact>
+              )}
+              {app.source && (
+                <Fact label="Source">
+                  <SourceTag app={app} />
+                </Fact>
+              )}
+              {app.type && <Fact label="Role type">{app.type}</Fact>}
+              {app.employment === 'internship' && <Fact label="Employment">Internship</Fact>}
+              {app.trackingRef && <Fact label="Reference">{app.trackingRef}</Fact>}
+              {app.trackingUrl && (
+                <Fact label="Track">
+                  <a
+                    href={app.trackingUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-accent hover:underline"
+                  >
+                    Status page
+                  </a>
+                </Fact>
+              )}
+            </dl>
+          </div>
+
+          <ContactPanel app={app} onEdit={() => setEditOpen(true)} />
+</>
+  );
+
+  const modals = (
+<>
+<EditModal
+        open={editOpen}
+        entry={app}
+        onClose={() => setEditOpen(false)}
+        onSave={handleSave}
+        onDelete={() => setConfirming(true)}
+      />
+      <ConfirmDelete
+        entry={confirming ? app : null}
+        onCancel={() => setConfirming(false)}
+        onConfirm={handleDelete}
+      />
+      <DocumentPreviewModal
+        open={previewOpen}
+        appId={app.id}
+        company={app.company}
+        role={app.role}
+        folderPath={app.folderPath}
+        onClose={() => setPreviewOpen(false)}
+        onRequestCv={handleGenerateCv}
+      />
+      <TerminalPanel
+        open={terminalOpen}
+        onClose={() => setTerminalOpen(false)}
+        onFinished={refreshFolders}
+      />
+      <LogMessageModal
+        open={logModalOpen}
+        onClose={() => setLogModalOpen(false)}
+        app={app}
+        onSaveNotes={handleSaveTrackingNotes}
+      />
+      <FollowUpModal
+        open={followUpOpen}
+        app={app}
+        onClose={() => setFollowUpOpen(false)}
+        onSaved={(updated) => setApps((prev) => prev.map((a) => (a.id === updated.id ? updated : a)))}
+      />
+</>
+  );
+
+  if (matcha) {
+    const hasCv = Boolean(folder?.cv) || isCvActuallyDone(app, folder);
+    const docRow = 'flex flex-wrap items-center gap-4 py-4';
+    const docIcon = 'flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-panel-2 text-accent';
+    const tabs: RoleTab[] = [
+      {
+        key: 'analysis',
+        label: 'Analysis',
+        icon: Icon.Sparkles,
+        node: (
+          <div className="space-y-4">
+            {readinessBar}
+            {fitCheckPrompt}
+            {fitVerdict}
+            {skillsMatch}
+            {app.analysis && (
+              <div className="panel-inset px-4 py-4">
+                <AnalysisPanel analysis={app.analysis} hideScore />
+              </div>
+            )}
+            {app.analysis && tailoring}
+            {reviewerBlock}
+          </div>
+        ),
+      },
+      ...(evidenceItems.length > 0
+        ? [{ key: 'evidence' as const, label: 'Evidence', icon: Icon.Shield, node: evidenceBlock }]
+        : []),
+      ...(app.analysis
+        ? [
+            {
+              key: 'ats' as const,
+              label: 'ATS',
+              icon: Icon.Gauge,
+              node: app.analysis.score ? (
+                <div className="space-y-3">
+                  <AtsScorePanel score={app.analysis.score} />
+                  <p className="text-micro text-ink-faint">
+                    Parsing risk is a gate, not a bar: a medium or high risk caps the overall score however well the other
+                    five dimensions score.
+                  </p>
+                </div>
+              ) : (
+                atsPrompt
+              ),
+            },
+          ]
+        : []),
+      ...(app.status === 'interview' ? [{ key: 'interview' as const, label: 'Interview', icon: Icon.Chat, node: interviewBlock }] : []),
+      {
+        key: 'documents',
+        label: 'Documents',
+        icon: Icon.Doc,
+        node: (
+          <div className="space-y-4">
+            <ul className="divide-y divide-line-soft border-y border-line-soft">
+              <li className={docRow}>
+                <span className={docIcon}>
+                  <Icon.Doc className="h-5 w-5" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-heading font-medium">CV and cover letter</span>
+                  <span className="mx-mono block text-ink-faint">{hasCv ? 'Generated' : 'Not generated yet'}</span>
+                </span>
+                {hasCv && (
+                  <button onClick={() => setPreviewOpen(true)} className="btn-ghost">
+                    <Icon.Doc className="h-3.5 w-3.5" />
+                    Preview
+                  </button>
+                )}
+              </li>
+              {folder?.studyGuide && (
+                <li className={docRow}>
+                  <span className={docIcon}>
+                    <Icon.GradCap className="h-5 w-5" />
+                  </span>
+                  <span className="min-w-0 flex-1 text-heading font-medium">Study guide</span>
+                  <button onClick={() => setPreviewOpen(true)} className="btn-ghost">
+                    <Icon.GradCap className="h-3.5 w-3.5" />
+                    Open
+                  </button>
+                </li>
+              )}
+              {app.link && (
+                <li className={docRow}>
+                  <span className={docIcon}>
+                    <Icon.External className="h-5 w-5" />
+                  </span>
+                  <span className="min-w-0 flex-1 text-heading font-medium">Job ad</span>
+                  <a href={app.link} target="_blank" rel="noopener noreferrer" className="btn-ghost">
+                    <Icon.External className="h-3.5 w-3.5" />
+                    Open
+                  </a>
+                </li>
+              )}
+              {app.links?.map((l) => (
+                <li key={l.url} className={docRow}>
+                  <span className={docIcon}>
+                    <Icon.External className="h-5 w-5" />
+                  </span>
+                  <span className="min-w-0 flex-1 text-heading font-medium">{l.label}</span>
+                  <a href={l.url} target="_blank" rel="noopener noreferrer" className="btn-ghost">
+                    <Icon.External className="h-3.5 w-3.5" />
+                    Open
+                  </a>
+                </li>
+              ))}
+            </ul>
+            {app.folderPath && <p className="mx-mono break-all text-ink-faint">{app.folderPath}</p>}
+            {jobAdPanel}
+          </div>
+        ),
+      },
+      {
+        key: 'correspondence',
+        label: 'Correspondence',
+        icon: Icon.Mail,
+        node: (
+          <div className="space-y-3">
+            {responseTimeline}
+            {correspondencePanel}
+          </div>
+        ),
+      },
+      ...(app.status === 'rejected' ? [{ key: 'rejection' as const, label: 'Rejection', icon: Icon.Close, node: rejectionBlock }] : []),
+      ...(app.status === 'offer' ? [{ key: 'negotiation' as const, label: 'Negotiation', icon: Icon.Handshake, node: negotiationBlock }] : []),
+      { key: 'history', label: 'History', icon: Icon.Clock, node: historyBlock },
+    ];
+    return (
+      <>
+        <MatchaRoleDetail
+          app={app}
+          readinessScore={readiness.score}
+          tabs={tabs}
+          actions={headerActions}
+          notices={
+            <div className="mb-6 space-y-3 empty:hidden">
+              {actionErrorNote}
+              {submissionWarning}
+            </div>
+          }
+          rail={railFacts}
+          onBack={backToPipeline}
+          onTerminal={() => setTerminalOpen(true)}
+        />
+        {modals}
+      </>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-[1400px] px-4 pb-24 pt-0 sm:px-10 min-w-0 max-w-full overflow-x-hidden">
@@ -361,39 +978,7 @@ export function RoleDetail() {
 
         <div className="flex shrink-0 flex-col items-end gap-2.5">
           <StatusPill status={app.status} />
-          <div className="flex items-center gap-1.5">
-            {(folder?.cv || isCvActuallyDone(app, folder)) && (
-              <button
-                onClick={() => setPreviewOpen(true)}
-                className="btn-primary"
-                title="Preview generated CV and cover letter"
-              >
-                <Icon.Doc className="h-3.5 w-3.5" />
-                Preview CV
-              </button>
-            )}
-            <button onClick={() => setEditOpen(true)} className="btn-ghost">
-              <Icon.Edit className="h-3.5 w-3.5" />
-              Edit
-            </button>
-            {app.folderPath && (
-              <button
-                onClick={openFolder}
-                disabled={folder?.exists === false}
-                title={folder?.exists === false ? "Folder doesn't exist yet" : 'Open in File Explorer'}
-                className="btn-ghost disabled:opacity-40"
-              >
-                <Icon.Folder className="h-3.5 w-3.5" />
-                Folder
-              </button>
-            )}
-            {app.link && (
-              <a href={app.link} target="_blank" rel="noopener noreferrer" className="btn-ghost">
-                <Icon.External className="h-3.5 w-3.5" />
-                Job ad
-              </a>
-            )}
-          </div>
+          {headerActions}
         </div>
       </div>
 
@@ -424,259 +1009,78 @@ export function RoleDetail() {
       <div className="grid grid-cols-1 gap-8 md:grid-cols-[minmax(0,1fr)_320px]">
         {/* Left column — narrative sections, only the ones that apply render. */}
         <div className="min-w-0 space-y-8">
-          <section id="overview">
+          <section id="overview" data-reveal>
             <h2 className="section-label mb-3">Overview</h2>
             <div className="space-y-3">
-              <ReadinessBar readiness={readiness} variant="full" />
-              {actionError && (
-                <p className="rounded-lg border border-rose/30 bg-rose/[0.06] px-3 py-2 text-micro text-rose">
-                  {actionError}
-                </p>
-              )}
+              {readinessBar}
+              {actionErrorNote}
               {/* Added 20 Aug 2026 — a Hauora Taiwhenua application went out on
                   SEEK missing a mandatory video the ad required alongside the
                   CV/cover letter; the requirement existed only as prose inside
                   gap.learningTasks, not loud enough to stop the submission.
                   This is the loud version: unmet items block visually, not
                   just in text that scrolls away. */}
-              {app.analysis?.submissionRequirements?.some((r) => !r.done) && (
-                <div className="rounded-2xl border border-rose/30 bg-rose/[0.06] px-4 py-3.5">
-                  <div className="flex items-start gap-2.5">
-                    <Icon.Warning className="mt-0.5 h-4 w-4 shrink-0 text-rose" />
-                    <div className="min-w-0">
-                      <p className="text-meta font-semibold text-rose">
-                        The ad asks for more than a CV and cover letter — don't submit without these
-                      </p>
-                      <ul className="mt-1.5 space-y-1">
-                        {app.analysis.submissionRequirements
-                          .filter((r) => !r.done)
-                          .map((r, i) => (
-                            <li key={i} className="text-micro text-ink-soft">
-                              <span className="text-rose">✕</span> {r.label}
-                              {r.note && <span className="text-ink-faint"> — {r.note}</span>}
-                            </li>
-                          ))}
-                      </ul>
-                    </div>
-                  </div>
-                </div>
-              )}
+              {submissionWarning}
+              {jobAdPanel}
               {/* Normally absent post-v2.5.1 — jobhq writes a lightweight analysis
                   (fit + skills, no score) the moment a job is logged. This only
                   shows for legacy entries logged before that, or if something
                   genuinely failed to write one. */}
-              {!app.analysis && (
-                <div className="panel-inset flex flex-wrap items-center justify-between gap-3 px-4 py-3.5">
-                  <div>
-                    <p className="text-meta font-medium text-ink">Fit check not run yet</p>
-                    <p className="mt-0.5 text-micro text-ink-faint">
-                      Skills match, gap analysis and an apply/skip verdict.
-                    </p>
-                  </div>
-                  <button
-                    onClick={handleRunAnalysis}
-                    disabled={analysisBusy || app.analysisStatus === 'queued'}
-                    className="btn-primary shrink-0 disabled:opacity-50"
-                  >
-                    <Icon.Target className="h-3.5 w-3.5" />
-                    {app.analysisStatus === 'queued' ? 'Queued…' : 'Run fit check'}
-                  </button>
-                </div>
-              )}
+              {fitCheckPrompt}
               {/* The normal case: fit already exists (written at logging time),
                   but the numeric ATS score is deliberately deferred until it's
                   actually needed — CV generation forces it anyway, this is just
                   for seeing it earlier if wanted. */}
-              {app.analysis && !app.analysis.score && (
-                <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line-soft bg-panel-2/40 px-3 py-2.5">
-                  <p className="text-micro text-ink-soft">
-                    Full ATS score not run yet — worth it before drafting a CV, not required before then.
-                  </p>
-                  <button
-                    onClick={handleRunAnalysis}
-                    disabled={analysisBusy || app.analysisStatus === 'queued'}
-                    className="btn-ghost shrink-0 text-micro disabled:opacity-50"
-                  >
-                    <Icon.Target className="h-3.5 w-3.5" />
-                    {app.analysisStatus === 'queued' ? 'Queued…' : 'Run full ATS score'}
-                  </button>
-                </div>
-              )}
-              <ResponseTimeline app={app} />
-              <div className="panel-inset px-5 py-4">
-                <CorrespondenceTimeline
-                  app={app}
-                  onLogMessage={() => setLogModalOpen(true)}
-                />
-              </div>
+              {atsPrompt}
+              {responseTimeline}
+              {correspondencePanel}
             </div>
           </section>
 
           {app.analysis && (
-            <section id="fit">
+            <section id="fit" data-reveal>
               <h2 className="section-label mb-3">Fit &amp; ATS</h2>
               <div className="space-y-4">
-                {app.analysis.recommendation && (
-                  <FitVerdictBanner
-                    recommendation={app.analysis.recommendation}
-                    onGenerateCv={handleGenerateCv}
-                    onCancelCv={handleCancelCv}
-                    cvBusy={cvBusy}
-                    cvQueued={isCvActuallyQueued(app, folder)}
-                    cvDone={isCvActuallyDone(app, folder)}
-                    onSkip={handleSkipClick}
-                    skipBusy={skipBusy}
-                    skipConfirming={skipConfirming}
-                    onDeleteLocal={handleDeleteLocal}
-                    deleteLocalBusy={deleteLocalBusy}
-                    userFacts={app.userFacts ?? ''}
-                    onSaveFacts={handleSaveFacts}
-                  />
-                )}
-                {evidenceItems.length > 0 && <SkillsMatchChart evidenceMap={evidenceMap} />}
-                <div className="panel-inset px-4 py-4">
-                  <AnalysisPanel analysis={app.analysis} />
-                </div>
-                {isCvActuallyDone(app, folder) && (
-                  <div className="panel-inset space-y-3 px-4 py-4">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <p className="text-meta font-medium text-ink">Reviewer critique</p>
-                        <p className="mt-0.5 text-micro text-ink-faint">
-                          Independent second opinion on the generated CV & cover letter — rechecks
-                          the ATS score and fact-checks claims against your real experience.
-                        </p>
-                      </div>
-                      <button
-                        onClick={handleRequestReview}
-                        disabled={reviewRun.running || app.reviewStatus === 'queued'}
-                        className="btn-ghost shrink-0 text-micro disabled:opacity-50"
-                      >
-                        {reviewRun.running || app.reviewStatus === 'queued' ? (
-                          <Icon.Clock className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Icon.Search className="h-3.5 w-3.5" />
-                        )}
-                        {reviewRun.running || app.reviewStatus === 'queued'
-                          ? 'Reviewing…'
-                          : app.analysis.review
-                            ? 'Review again'
-                            : 'Review'}
-                      </button>
-                    </div>
-
-                    {(reviewRun.running || reviewRun.lines.length > 0) && (
-                      <div className="max-h-56 overflow-y-auto rounded-lg bg-canvas px-3 py-2.5 font-mono text-micro leading-relaxed">
-                        {reviewRun.lines.map((l, i) => (
-                          <div
-                            key={i}
-                            className={`whitespace-pre-wrap break-words ${
-                              l.stream === 'err'
-                                ? 'text-rose'
-                                : l.stream === 'meta'
-                                  ? 'text-ink-faint'
-                                  : 'text-ink'
-                            }`}
-                          >
-                            {l.line}
-                          </div>
-                        ))}
-                        {reviewRun.running && (
-                          <span className="inline-block h-3.5 w-1.5 animate-pulse bg-accent align-middle" />
-                        )}
-                      </div>
-                    )}
-                    {reviewRun.error && <p className="text-micro text-rose">{reviewRun.error}</p>}
-
-                    {!reviewRun.running && app.analysis.review && (
-                      <div className="rounded-lg border border-line-soft bg-panel-2/40 px-3 py-2.5">
-                        <p className="text-micro font-medium text-ink">
-                          Last reviewed{' '}
-                          {new Date(app.analysis.review.at).toLocaleDateString(undefined, {
-                            day: 'numeric',
-                            month: 'short',
-                            year: 'numeric',
-                          })}{' '}
-                          ·{' '}
-                          <span
-                            className={
-                              app.analysis.review.verdict === 'clean' ? 'text-grass' : 'text-amber'
-                            }
-                          >
-                            {app.analysis.review.verdict === 'clean' ? 'Clean' : 'Issues found'}
-                          </span>
-                          {!app.analysis.review.atsScoreConfirmed && (
-                            <span className="text-rose"> · ATS score mismatch</span>
-                          )}
-                        </p>
-                        <p className="mt-1 text-micro text-ink-soft">{app.analysis.review.summary}</p>
-                        {app.analysis.review.issues.length > 0 && (
-                          <ul className="mt-1.5 space-y-1">
-                            {app.analysis.review.issues.map((issue, i) => (
-                              <li key={i} className="text-micro text-ink-faint">
-                                · {issue}
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
+                {fitVerdict}
+                {skillsMatch}
+                {analysisPanel}
+                {tailoring}
+                {reviewerBlock}
               </div>
             </section>
           )}
 
           {evidenceItems.length > 0 && (
-            <section id="evidence">
+            <section id="evidence" data-reveal>
               <h2 className="section-label mb-3">Evidence</h2>
-              <div className="panel px-5 py-4">
-                <ul className="divide-y divide-line-soft">
-                  {evidenceItems.map(([keyword, item]) => (
-                    <EvidenceRow key={keyword} keyword={keyword} item={item} />
-                  ))}
-                </ul>
-                {!app.evidenceMap && (
-                  <p className="mt-4 border-t border-line-soft pt-3 text-micro text-ink-faint">
-                    Auto-derived from ATS analysis. Ask Claude in chat to refine — attach sources,
-                    mark keywords Jordan can actually back up.
-                  </p>
-                )}
-              </div>
+              {evidenceBlock}
             </section>
           )}
 
           {app.status === 'interview' && (
-            <section id="interview">
+            <section id="interview" data-reveal>
               <h2 className="section-label mb-3">Interview</h2>
-              {app.interview ? <InterviewWarRoom app={app} /> : <InterviewPrep app={app} />}
+              {interviewBlock}
             </section>
           )}
 
           {app.status === 'rejected' && (
-            <section id="rejection">
+            <section id="rejection" data-reveal>
               <h2 className="section-label mb-3">Rejection</h2>
-              <RejectionPanel app={app} onSaved={(u) => setApps((l) => l.map((a) => (a.id === u.id ? u : a)))} />
+              {rejectionBlock}
             </section>
           )}
 
           {app.status === 'offer' && (
-            <section id="negotiation">
+            <section id="negotiation" data-reveal>
               <h2 className="section-label mb-3">Negotiation</h2>
-              <NegotiationPanel app={app} />
+              {negotiationBlock}
             </section>
           )}
 
-          <section id="history">
+          <section id="history" data-reveal>
             <h2 className="section-label mb-3">History</h2>
-            <div className="space-y-3">
-              {app.statusHistory && app.statusHistory.length > 1 && (
-                <div className="panel-inset px-4 py-3">
-                  <StatusTimeline history={app.statusHistory} />
-                </div>
-              )}
-              <ActivityTimeline activity={app.activity} />
-            </div>
+            {historyBlock}
           </section>
         </div>
 
@@ -703,96 +1107,11 @@ export function RoleDetail() {
             </nav>
           )}
 
-          <div className="panel-inset px-4 py-3.5">
-            <p className="section-label mb-2.5">Details</p>
-            <dl className="space-y-2 text-meta">
-              {app.date && (
-                <Fact label="Applied">{app.date}</Fact>
-              )}
-              {app.deadline && (
-                <Fact label="Closes">
-                  <DeadlineTag app={app} />
-                </Fact>
-              )}
-              {app.followUpDue && (
-                <Fact label="Follow up">
-                  <FollowUpTag app={app} />
-                </Fact>
-              )}
-              {app.salary && (
-                <Fact label="Salary">
-                  <SalaryTag app={app} />
-                </Fact>
-              )}
-              {app.workArrangement && (
-                <Fact label="Arrangement">
-                  <ArrangementTag app={app} />
-                </Fact>
-              )}
-              {app.workHours && (
-                <Fact label="Hours">
-                  <WorkHoursTag app={app} />
-                </Fact>
-              )}
-              {app.source && (
-                <Fact label="Source">
-                  <SourceTag app={app} />
-                </Fact>
-              )}
-              {app.type && <Fact label="Role type">{app.type}</Fact>}
-              {app.employment === 'internship' && <Fact label="Employment">Internship</Fact>}
-              {app.trackingRef && <Fact label="Reference">{app.trackingRef}</Fact>}
-              {app.trackingUrl && (
-                <Fact label="Track">
-                  <a
-                    href={app.trackingUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-accent hover:underline"
-                  >
-                    Status page
-                  </a>
-                </Fact>
-              )}
-            </dl>
-          </div>
-
-          <ContactPanel app={app} onEdit={() => setEditOpen(true)} />
+          {railFacts}
         </aside>
       </div>
 
-      <EditModal
-        open={editOpen}
-        entry={app}
-        onClose={() => setEditOpen(false)}
-        onSave={handleSave}
-        onDelete={() => setConfirming(true)}
-      />
-      <ConfirmDelete
-        entry={confirming ? app : null}
-        onCancel={() => setConfirming(false)}
-        onConfirm={handleDelete}
-      />
-      <DocumentPreviewModal
-        open={previewOpen}
-        appId={app.id}
-        company={app.company}
-        role={app.role}
-        folderPath={app.folderPath}
-        onClose={() => setPreviewOpen(false)}
-        onRequestCv={handleGenerateCv}
-      />
-      <TerminalPanel
-        open={terminalOpen}
-        onClose={() => setTerminalOpen(false)}
-        onFinished={refreshFolders}
-      />
-      <LogMessageModal
-        open={logModalOpen}
-        onClose={() => setLogModalOpen(false)}
-        app={app}
-        onSaveNotes={handleSaveTrackingNotes}
-      />
+      {modals}
     </div>
   );
 }

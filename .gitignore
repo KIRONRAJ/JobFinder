@@ -3,6 +3,7 @@ dist/
 /data/*
 !/data/interview-bank.json
 !/data/quiz-bank.json
+!/data/ats-lexicon.json
 /requests/
 .env
 .env.local

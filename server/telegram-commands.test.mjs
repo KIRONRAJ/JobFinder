@@ -20,11 +20,28 @@ import {
   parseSeekHtml,
   isInvalidParsedJob,
   parseJobFromUrl,
+  analyzeJobWithAI,
+  analyzeRoleFitWithoutListing,
+  formatJobLoggedMessage,
   runGitSync,
+  buildDisambiguationKeyboard,
+  parseDateOffsetOrString,
+  formatGmailFetchSummary,
+  getTelegramWebAppUrl,
+  buildMainMenuKeyboard,
+  syncTelegramMenuButton,
+  interpretVoiceMessage,
+  formatFitAnalysis,
 } from './telegram-commands.js';
+import { verifyTelegramWebAppData } from './index.js';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function dateStr(offsetDays) {
   const d = new Date();
@@ -188,6 +205,59 @@ test('formatPrep: formats prep notes when available', () => {
   const prep = formatPrep(app);
   assert.ok(prep.includes('Datacom'));
   assert.ok(prep.includes('Linux troubleshooting experience'));
+});
+
+test('formatFitAnalysis: formats structured analysis breakdown', () => {
+  const app = {
+    company: 'Spark NZ',
+    role: 'Cyber Security Analyst',
+    fit: 'strong',
+    analysis: {
+      at: Date.now(),
+      recommendation: {
+        verdict: 'apply',
+        reasoning: 'Direct alignment with L2 network troubleshooting and SIEM monitoring.',
+      },
+      score: {
+        overall: 88,
+        keywordMatch: 85,
+        technicalMatch: 90,
+        experienceMatch: 80,
+        industryMatch: 85,
+        parsingRisk: 'low',
+      },
+      ats: {
+        matched: ['SIEM incident response', 'Linux network administration'],
+        missing: ['AWS Security certification'],
+      },
+      gap: {
+        positioning: 'Emphasize 24/7 ISP NOC triage and Master of Information Security with Merit.',
+      },
+    },
+  };
+  const msg = formatFitAnalysis(app);
+  assert.ok(msg.includes('FIT ANALYSIS · Spark NZ'));
+  assert.ok(msg.includes('Cyber Security Analyst'));
+  assert.ok(msg.includes('🟢 *APPLY*'));
+  assert.ok(msg.includes('88/100'));
+  assert.ok(msg.includes('Direct alignment with L2 network troubleshooting'));
+  assert.ok(msg.includes('Keywords: 85%'));
+  assert.ok(msg.includes('Tech: 90%'));
+  assert.ok(msg.includes('SIEM incident response'));
+  assert.ok(msg.includes('AWS Security certification'));
+  assert.ok(msg.includes('Emphasize 24/7 ISP NOC triage'));
+});
+
+test('formatFitAnalysis: handles missing analysis gracefully with guidance', () => {
+  const appWithoutAd = { company: 'Xero', role: 'Support Specialist' };
+  const msg1 = formatFitAnalysis(appWithoutAd);
+  assert.ok(msg1.includes('FIT ANALYSIS · Xero'));
+  assert.ok(msg1.includes('No deep fit analysis generated yet'));
+  assert.ok(msg1.includes('Paste the job link in chat'));
+
+  const appWithAd = { company: 'Xero', role: 'Support Specialist', jobText: 'Sample ad text' };
+  const msg2 = formatFitAnalysis(appWithAd);
+  assert.ok(msg2.includes('Ad text is saved'));
 });
 
 test('isAuthorizedChat: matches when chat id equals configured id', () => {
@@ -414,24 +484,7 @@ test('formatRadar: highlights Wellington and Remote active roles', () => {
 });
 
 test('getPracticeCard and formatPracticeMessage: picks a question and formats buttons', async () => {
-  const tmpDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'interview-bank-test-'));
-  const bankPath = path.join(tmpDir, 'interview-bank.json');
-  await fsPromises.writeFile(
-    bankPath,
-    JSON.stringify({
-      questions: [
-        {
-          category: 'behavioural',
-          question: 'Tell me about a time you fixed a production issue under pressure.',
-          hints: ['Anchor on a specific incident, not a general description.'],
-          answer: 'Situation, task, action, result — a concrete four-part example.',
-        },
-      ],
-    }),
-    'utf8'
-  );
-
-  const card = await getPracticeCard('behavioural', { bankPath });
+  const card = await getPracticeCard('behavioural');
   assert.ok(card);
   assert.ok(card.question);
   const { text, replyMarkup } = formatPracticeMessage(card);
@@ -443,23 +496,7 @@ test('getPracticeCard and formatPracticeMessage: picks a question and formats bu
 });
 
 test('getQuizQuestion: returns question from quiz bank', async () => {
-  const tmpDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'quiz-bank-test-'));
-  const quizPath = path.join(tmpDir, 'quiz-bank.json');
-  await fsPromises.writeFile(
-    quizPath,
-    JSON.stringify([
-      {
-        category: 'linux',
-        question: 'Which command lists running processes?',
-        options: ['ps', 'cat', 'grep', 'chmod'],
-        correctOptionId: 0,
-        explanation: '"ps" reports the current process status.',
-      },
-    ]),
-    'utf8'
-  );
-
-  const quiz = await getQuizQuestion('linux', { quizPath });
+  const quiz = await getQuizQuestion('linux');
   assert.ok(quiz);
   assert.ok(quiz.question);
   assert.ok(Array.isArray(quiz.options));
@@ -494,15 +531,27 @@ test('updateLearningLoop: increments count and stores rejection note', async () 
 
 test('handleUpdate: /app sends dashboard web button', async () => {
   const { impl, calls } = fakeSender();
-  await handleUpdate(
-    { update_id: 10, message: { chat: { id: 12345 }, text: '/app' } },
-    { getApplications: async () => [], token: 'T', chatId: '12345', sendTelegramImpl: impl }
-  );
+  const tunnelFile = path.resolve(__dirname, '../data/tunnel-url.txt');
+  let savedTunnel = null;
+  if (fs.existsSync(tunnelFile)) {
+    savedTunnel = fs.readFileSync(tunnelFile, 'utf8');
+    fs.unlinkSync(tunnelFile);
+  }
+  try {
+    await handleUpdate(
+      { update_id: 10, message: { chat: { id: 12345 }, text: '/app' } },
+      { getApplications: async () => [], token: 'T', chatId: '12345', sendTelegramImpl: impl }
+    );
 
-  assert.equal(calls.length, 1);
-  assert.ok(calls[0].text.includes('Job Search HQ Mobile Dashboard'));
-  assert.equal(calls[0].opts.replyMarkup.inline_keyboard[0][0].text, '🚀 Open JobSearchHQ Dashboard');
-  assert.ok(calls[0].opts.replyMarkup.inline_keyboard[0][0].url.includes('5178'));
+    assert.equal(calls.length, 1);
+    assert.ok(calls[0].text.includes('Job Search HQ Mobile Dashboard'));
+    assert.equal(calls[0].opts.replyMarkup.inline_keyboard[0][0].text, '🚀 Open JobSearchHQ Dashboard');
+    assert.ok(calls[0].opts.replyMarkup.inline_keyboard[0][0].url.includes('5178'));
+  } finally {
+    if (savedTunnel !== null) {
+      fs.writeFileSync(tunnelFile, savedTunnel, 'utf8');
+    }
+  }
 });
 
 test('handleUpdate: /radar sends Wellington & Remote digest', async () => {
@@ -602,35 +651,67 @@ test('cleanJobUrl: strips query tracking parameters and hashes', () => {
   assert.equal(cleanJobUrl('not a url'), 'not a url');
 });
 
+test('cleanJobUrl: rewrites www.seek.co.nz and seek.co.nz to nz.seek.com', () => {
+  assert.equal(
+    cleanJobUrl('https://www.seek.co.nz/job/94417890?tracking=123'),
+    'https://nz.seek.com/job/94417890'
+  );
+  assert.equal(
+    cleanJobUrl('https://seek.co.nz/job/94417890#details'),
+    'https://nz.seek.com/job/94417890'
+  );
+});
+
 test('parseSeekHtml: correctly extracts advertiser, job title, and location', () => {
   const seekHtml = `
     <html>
       <head><title>Data Administrator/ Customer Service Representative  Job in Wellington Central, Wellington - SEEK</title></head>
       <body>
         <h1 data-automation="job-detail-title">Data Administrator / Customer Service Representative</h1>
-        <span data-automation="advertiser-name">Bluecurrent</span>
+        <span data-automation="advertiser-name">Acme Energy</span>
         <span data-automation="job-detail-location">Wellington Central, Wellington</span>
       </body>
     </html>
   `;
   const parsed = parseSeekHtml(seekHtml, 'https://nz.seek.com/job/94417890?tracking=123');
-  assert.equal(parsed.company, 'Bluecurrent');
+  assert.equal(parsed.company, 'Acme Energy');
   assert.equal(parsed.role, 'Data Administrator / Customer Service Representative');
   assert.equal(parsed.location, 'Wellington Central, Wellington');
   assert.equal(parsed.url, 'https://nz.seek.com/job/94417890');
 });
 
+test('parseSeekHtml: extracts company, role, and location from window.SEEK_REDUX_DATA', () => {
+  const reduxPayload = {
+    jobdetails: {
+      result: {
+        job: {
+          title: 'Cyber Security Operations Analyst',
+          advertiser: { name: 'Ministry of Justice' },
+          location: { label: 'Wellington Central, Wellington' },
+          content: '<div>Full ad details here...</div>',
+        },
+      },
+    },
+  };
+  const html = `<html><head><script>window.SEEK_REDUX_DATA = ${JSON.stringify(reduxPayload)};</script></head><body>Fallbacks</body></html>`;
+  const parsed = parseSeekHtml(html, 'https://www.seek.co.nz/job/123456');
+  assert.equal(parsed.company, 'Ministry of Justice');
+  assert.equal(parsed.role, 'Cyber Security Operations Analyst');
+  assert.equal(parsed.location, 'Wellington Central, Wellington');
+  assert.equal(parsed.url, 'https://nz.seek.com/job/123456');
+});
+
 test('isInvalidParsedJob: flags domain as company, numeric role, or empty values', () => {
   assert.equal(isInvalidParsedJob({ company: 'nz.seek.com', role: '94417890' }), true);
   assert.equal(isInvalidParsedJob({ company: 'seek.co.nz', role: 'Engineer' }), true);
-  assert.equal(isInvalidParsedJob({ company: 'Bluecurrent', role: '94417890' }), true);
+  assert.equal(isInvalidParsedJob({ company: 'Acme Energy', role: '94417890' }), true);
   assert.equal(isInvalidParsedJob({ company: 'Disclosed in Ad', role: 'Engineer' }), true);
-  assert.equal(isInvalidParsedJob({ company: 'Bluecurrent', role: 'Captured Role' }), true);
+  assert.equal(isInvalidParsedJob({ company: 'Acme Energy', role: 'Captured Role' }), true);
   assert.equal(isInvalidParsedJob({ company: '', role: 'Engineer' }), true);
   assert.equal(isInvalidParsedJob(null), true);
 
   // Valid
-  assert.equal(isInvalidParsedJob({ company: 'Bluecurrent', role: 'Data Administrator' }), false);
+  assert.equal(isInvalidParsedJob({ company: 'Acme Energy', role: 'Data Administrator' }), false);
 });
 
 test('handleUpdate: invalid parsed job rejects without calling createApplication', async () => {
@@ -678,7 +759,7 @@ test('handleUpdate: /log manually creates entry cleanly', async () => {
       update_id: 14,
       message: {
         chat: { id: 12345 },
-        text: '/log Bluecurrent — Data Administrator https://nz.seek.com/job/94417890?tracking=xyz',
+        text: '/log Acme Energy — Data Administrator https://nz.seek.com/job/94417890?tracking=xyz',
       },
     },
     {
@@ -690,16 +771,345 @@ test('handleUpdate: /log manually creates entry cleanly', async () => {
       token: 'T',
       chatId: '12345',
       sendTelegramImpl: impl,
+      fetchImpl: noNetFetch,
+      apiKey: '',
+      execFileImpl: (_cmd, _args, _opts, cb) => {
+        const fn = typeof _opts === 'function' ? _opts : cb;
+        if (fn) fn(new Error('no curl'), '');
+      },
     }
   );
 
   assert.ok(createdEntry);
-  assert.equal(createdEntry.company, 'Bluecurrent');
+  assert.equal(createdEntry.company, 'Acme Energy');
   assert.equal(createdEntry.role, 'Data Administrator');
   assert.equal(createdEntry.link, 'https://nz.seek.com/job/94417890');
   assert.equal(calls.length, 1);
   assert.ok(calls[0].text.includes('Manually Logged Role'));
-  assert.ok(calls[0].text.includes('Bluecurrent'));
+  assert.ok(calls[0].text.includes('Acme Energy'));
+});
+
+test('analyzeJobWithAI: extracts rich fields and fit check from job text', async () => {
+  const mockGeminiData = {
+    company: 'Datacom',
+    role: 'Cyber Security Operations Analyst',
+    location: 'Wellington, NZ',
+    roleType: 'SOC Analyst',
+    employment: 'job',
+    workArrangement: 'hybrid',
+    salary: '$75,000 - $85,000',
+    deadline: '2026-10-25',
+    source: 'Seek',
+    fit: 'strong',
+    fitReason: {
+      strengths: 'Direct alignment with L2 NOC monitoring and Linux server troubleshooting.',
+      gaps: 'Splunk experience preferred.',
+      recommendation: 'Highlight 24/7 rota and incident triage experience.',
+    },
+    tags: ['SOC', 'Wellington', 'Datacom', 'Hybrid'],
+    notes: '24/7 SOC role responsible for alert triage and incident escalation.',
+  };
+
+  const mockFetch = async () => ({
+    ok: true,
+    json: async () => ({
+      candidates: [{ content: { parts: [{ text: JSON.stringify(mockGeminiData) }] } }],
+    }),
+  });
+
+  const res = await analyzeJobWithAI('Sample job text with more than twenty characters for testing', 'https://nz.seek.com/job/123', {
+    apiKey: 'test-api-key',
+    fetchImpl: mockFetch,
+  });
+
+  assert.ok(res);
+  assert.equal(res.company, 'Datacom');
+  assert.equal(res.role, 'Cyber Security Operations Analyst');
+  assert.equal(res.roleType, 'SOC Analyst');
+  assert.equal(res.fit, 'strong');
+  assert.equal(res.salary, '$75,000 - $85,000');
+  assert.equal(res.deadline, '2026-10-25');
+  assert.equal(res.workArrangement, 'hybrid');
+  assert.deepEqual(res.tags, ['SOC', 'Wellington', 'Datacom', 'Hybrid']);
+  assert.ok(res.fitReason.strengths.includes('L2 NOC'));
+});
+
+test('analyzeRoleFitWithoutListing: evaluates role title fit against candidate background', async () => {
+  const mockGeminiData = {
+    roleType: 'SOC Analyst',
+    fit: 'strong',
+    fitReason: {
+      strengths: 'L2 NOC experience is directly transferable.',
+      gaps: 'None noted.',
+      recommendation: 'Emphasize network monitoring and incident escalation.',
+    },
+    tags: ['SOC', 'Analyst'],
+    notes: 'Strong match based on NOC and Linux background.',
+  };
+
+  const mockFetch = async () => ({
+    ok: true,
+    json: async () => ({
+      candidates: [{ content: { parts: [{ text: JSON.stringify(mockGeminiData) }] } }],
+    }),
+  });
+
+  const res = await analyzeRoleFitWithoutListing('Datacom', 'SOC Analyst', {
+    apiKey: 'test-api-key',
+    fetchImpl: mockFetch,
+  });
+
+  assert.equal(res.roleType, 'SOC Analyst');
+  assert.equal(res.fit, 'strong');
+  assert.ok(res.fitReason);
+  assert.deepEqual(res.tags, ['SOC', 'Analyst']);
+});
+
+test('handleUpdate: /add <url> auto-fetches ad, runs AI fit check, and persists rich fields', async () => {
+  const { impl, calls } = fakeSender();
+  let createdEntry = null;
+
+  const mockGeminiData = {
+    company: 'Spark NZ',
+    role: 'Security Analyst',
+    location: 'Wellington, NZ',
+    roleType: 'SOC Analyst',
+    employment: 'job',
+    workArrangement: 'hybrid',
+    salary: '$80,000',
+    deadline: '2026-11-01',
+    source: 'Seek',
+    fit: 'strong',
+    fitReason: {
+      strengths: 'Master of IT in Cyber Security with Merit matches role requirements.',
+      gaps: 'Requires familiarity with QRadar.',
+      recommendation: 'Position L2 ISP network troubleshooting background.',
+    },
+    tags: ['Security', 'Wellington', 'Spark'],
+    notes: 'Handles tier 1 and tier 2 security event triage.',
+  };
+
+  const mockFetch = async (url) => {
+    if (String(url).includes('generateContent')) {
+      return {
+        ok: true,
+        json: async () => ({
+          candidates: [{ content: { parts: [{ text: JSON.stringify(mockGeminiData) }] } }],
+        }),
+      };
+    }
+    return { ok: true, json: async () => ({ ok: true, result: {} }) };
+  };
+
+  const mockHtml = '<html><head><title>Security Analyst at Spark NZ</title></head><body>We are hiring a Security Analyst in Wellington for Spark NZ. Responsibilities include SIEM monitoring and incident response.</body></html>';
+
+  const tmpCareerDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'career-test-'));
+  try {
+    await handleUpdate(
+      {
+        update_id: 15,
+        message: {
+          chat: { id: 12345 },
+          text: '/add https://nz.seek.com/job/99999999',
+        },
+      },
+      {
+        getApplications: async () => [],
+        createApplication: async (data) => {
+          createdEntry = { ...data, id: 'app_spark_123' };
+          return { existing: false, entry: createdEntry };
+        },
+        token: 'T',
+        chatId: '12345',
+        careerDir: tmpCareerDir,
+        sendTelegramImpl: impl,
+        fetchImpl: mockFetch,
+        apiKey: 'test-api-key',
+        execFileImpl: (_cmd, _args, _opts, cb) => {
+          const fn = typeof _opts === 'function' ? _opts : cb;
+          if (fn) fn(null, mockHtml);
+        },
+      }
+    );
+
+    assert.ok(createdEntry, 'Application should be created');
+    assert.equal(createdEntry.company, 'Spark NZ');
+
+    const savedAd = await fsPromises.readFile(
+      path.join(tmpCareerDir, 'Pending to Apply', 'Spark NZ', 'Job Ad - Security Analyst.txt'),
+      'utf8'
+    );
+    assert.ok(savedAd.includes('Spark NZ — Security Analyst'));
+  } finally {
+    await fsPromises.rm(tmpCareerDir, { recursive: true, force: true });
+  }
+  assert.equal(createdEntry.role, 'Security Analyst');
+  assert.equal(createdEntry.fit, 'strong');
+  assert.equal(createdEntry.roleType, 'SOC Analyst');
+  assert.equal(createdEntry.salary, '$80,000');
+  assert.equal(createdEntry.deadline, '2026-11-01');
+  assert.deepEqual(createdEntry.tags, ['Security', 'Wellington', 'Spark']);
+
+  // Check calls: call 0 is "Fetching...", call 1 is the formatted card
+  assert.equal(calls.length, 2);
+  assert.ok(calls[0].text.includes('Fetching and analyzing job ad'));
+  const confirmationText = calls[1].text;
+  assert.ok(confirmationText.includes('Spark NZ'));
+  assert.ok(confirmationText.includes('Security Analyst'));
+  assert.ok(confirmationText.includes('🟢 *Strong*'));
+  assert.ok(confirmationText.includes('Salary: $80,000'));
+  assert.ok(confirmationText.includes('Closes: 2026-11-01'));
+  assert.ok(confirmationText.includes('AI Fit Check:'));
+  assert.ok(confirmationText.includes('Strengths:'));
+  assert.ok(confirmationText.includes('Watch-outs:'));
+  assert.ok(confirmationText.includes('Strategy:'));
+  assert.ok(confirmationText.includes('#Security'));
+});
+
+test('handleUpdate: raw job url paste triggers AI analysis and rich confirmation', async () => {
+  const { impl, calls } = fakeSender();
+  let createdEntry = null;
+
+  const mockGeminiData = {
+    company: 'Xero',
+    role: 'IT Security Specialist',
+    location: 'Wellington, NZ',
+    roleType: 'IT Security Support',
+    employment: 'job',
+    workArrangement: 'onsite',
+    salary: '$85,000',
+    deadline: '2026-10-31',
+    source: 'Seek',
+    fit: 'good',
+    fitReason: {
+      strengths: 'Strong Linux systems and network administration skills.',
+      gaps: 'Prefers 3 years corporate IT security experience.',
+      recommendation: 'Highlight Cascade server support and RHCSA credential.',
+    },
+    tags: ['Xero', 'ITSecurity', 'Wellington'],
+    notes: 'Internal IT security operations and access management.',
+  };
+
+  const mockFetch = async (url) => {
+    if (String(url).includes('generateContent')) {
+      return {
+        ok: true,
+        json: async () => ({
+          candidates: [{ content: { parts: [{ text: JSON.stringify(mockGeminiData) }] } }],
+        }),
+      };
+    }
+    return { ok: true, json: async () => ({ ok: true, result: {} }) };
+  };
+
+  const mockHtml = '<html><head><title>IT Security Specialist - Xero</title></head><body>Join Xero as an IT Security Specialist in Wellington. We are looking for someone to maintain internal security operations, monitor identity access, and support incident response.</body></html>';
+
+  const tmpCareerDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'career-test-'));
+  try {
+    await handleUpdate(
+      {
+        update_id: 16,
+        message: {
+          chat: { id: 12345 },
+          text: 'https://nz.seek.com/job/88888888',
+        },
+      },
+      {
+        getApplications: async () => [],
+        createApplication: async (data) => {
+          createdEntry = { ...data, id: 'app_xero_456' };
+          return { existing: false, entry: createdEntry };
+        },
+        token: 'T',
+        chatId: '12345',
+        careerDir: tmpCareerDir,
+        sendTelegramImpl: impl,
+        fetchImpl: mockFetch,
+        apiKey: 'test-api-key',
+        execFileImpl: (_cmd, _args, _opts, cb) => {
+          const fn = typeof _opts === 'function' ? _opts : cb;
+          if (fn) fn(null, mockHtml);
+        },
+      }
+    );
+  } finally {
+    await fsPromises.rm(tmpCareerDir, { recursive: true, force: true });
+  }
+
+  assert.ok(createdEntry);
+  assert.equal(createdEntry.company, 'Xero');
+  assert.equal(createdEntry.fit, 'good');
+  assert.equal(createdEntry.roleType, 'IT Security Support');
+  assert.equal(createdEntry.salary, '$85,000');
+  assert.equal(calls.length, 2);
+  assert.ok(calls[1].text.includes('Xero'));
+  assert.ok(calls[1].text.includes('🟡 *Good*'));
+});
+
+test('handleUpdate: /add Company — Role performs title-only fit check', async () => {
+  const { impl, calls } = fakeSender();
+  let createdEntry = null;
+
+  const mockGeminiData = {
+    roleType: 'GRC',
+    fit: 'good',
+    fitReason: {
+      strengths: 'Cybersecurity Master degree covers compliance and privacy law.',
+      gaps: 'Less direct audit experience than dedicated GRC consultants.',
+      recommendation: 'Highlight academic knowledge of NIST and NZISM frameworks.',
+    },
+    tags: ['GRC', 'Compliance'],
+    notes: 'GRC role title matches security governance knowledge.',
+  };
+
+  const mockFetch = async (url) => {
+    if (String(url).includes('generateContent')) {
+      return {
+        ok: true,
+        json: async () => ({
+          candidates: [{ content: { parts: [{ text: JSON.stringify(mockGeminiData) }] } }],
+        }),
+      };
+    }
+    return { ok: true, json: async () => ({ ok: true, result: {} }) };
+  };
+
+  await handleUpdate(
+    {
+      update_id: 17,
+      message: {
+        chat: { id: 12345 },
+        text: '/add Deloitte — Cyber Risk Analyst',
+      },
+    },
+    {
+      getApplications: async () => [],
+      createApplication: async (data) => {
+        createdEntry = { ...data, id: 'app_deloitte_789' };
+        return { existing: false, entry: createdEntry };
+      },
+      token: 'T',
+      chatId: '12345',
+      sendTelegramImpl: impl,
+      fetchImpl: mockFetch,
+      apiKey: 'test-api-key',
+      execFileImpl: (_cmd, _args, _opts, cb) => {
+        const fn = typeof _opts === 'function' ? _opts : cb;
+        if (fn) fn(new Error('no curl'), '');
+      },
+    }
+  );
+
+  assert.ok(createdEntry);
+  assert.equal(createdEntry.company, 'Deloitte');
+  assert.equal(createdEntry.role, 'Cyber Risk Analyst');
+  assert.equal(createdEntry.fit, 'good');
+  assert.equal(createdEntry.roleType, 'GRC');
+  assert.deepEqual(createdEntry.tags, ['GRC', 'Compliance']);
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].text.includes('Deloitte'));
+  assert.ok(calls[0].text.includes('AI Fit Check:'));
+  assert.ok(calls[0].text.includes('Cyber Risk Analyst'));
 });
 
 test('runGitSync: stages, commits if changed, pulls with rebase, and pushes', async () => {
@@ -874,6 +1284,530 @@ test('handleUpdate: keyboard button "📨 Gmail Fetch" triggers /gmail', async (
   assert.ok(calls[0].text.includes('Checking your last 10 emails'));
 });
 
+test('parseDateOffsetOrString: correctly parses relative and absolute dates', () => {
+  assert.equal(parseDateOffsetOrString('today'), dateStr(0));
+  assert.equal(parseDateOffsetOrString('tomorrow'), dateStr(1));
+  assert.equal(parseDateOffsetOrString('3d'), dateStr(3));
+  assert.equal(parseDateOffsetOrString('1w'), dateStr(7));
+  assert.equal(parseDateOffsetOrString('2026-10-15'), '2026-10-15');
+  assert.equal(parseDateOffsetOrString('invalid'), null);
+});
+
+test('buildDisambiguationKeyboard: formats inline buttons for multiple matches', () => {
+  const matches = [
+    { id: '1', company: 'Spark NZ', role: 'Cloud Engineer', status: 'applied' },
+    { id: '2', company: 'Spark Services', role: 'Support Analyst', status: 'interview' },
+  ];
+  const markup = buildDisambiguationKeyboard('view_role', matches);
+  assert.equal(markup.inline_keyboard.length, 2);
+  assert.equal(markup.inline_keyboard[0][0].callback_data, 'view_role:1');
+  assert.equal(markup.inline_keyboard[1][0].callback_data, 'view_role:2');
+});
+
+test('handleUpdate: /cvgen queues CV tailoring request', async () => {
+  const calls = [];
+  const impl = async (text, opts) => calls.push({ text, opts });
+  let queuedId = null;
+
+  const apps = [{ id: 'app_spark', company: 'Spark', role: 'Engineer', status: 'researching' }];
+
+  await handleUpdate(
+    { update_id: 21, message: { chat: { id: 12345 }, text: '/cvgen Spark' } },
+    {
+      getApplications: async () => apps,
+      token: 'T',
+      chatId: '12345',
+      sendTelegramImpl: impl,
+      queueCvRequest: async (id) => {
+        queuedId = id;
+        return apps[0];
+      },
+    }
+  );
+
+  assert.equal(queuedId, 'app_spark');
+  assert.ok(calls[0].text.includes('CV Tailoring Queued'));
+});
+
+test('handleUpdate: /task adds task to application', async () => {
+  const calls = [];
+  const impl = async (text, opts) => calls.push({ text, opts });
+  let addedTask = null;
+
+  const apps = [{ id: 'app_spark', company: 'Spark', role: 'Engineer', status: 'applied', tasks: [] }];
+
+  await handleUpdate(
+    { update_id: 22, message: { chat: { id: 12345 }, text: '/task Spark Call recruiter Sarah tomorrow' } },
+    {
+      getApplications: async () => apps,
+      token: 'T',
+      chatId: '12345',
+      sendTelegramImpl: impl,
+      addTask: async (id, label, dueAt) => {
+        addedTask = { id, label, dueAt };
+        return { entry: apps[0], task: { id: 'task_1', label, dueAt } };
+      },
+    }
+  );
+
+  assert.ok(addedTask);
+  assert.equal(addedTask.id, 'app_spark');
+  assert.equal(addedTask.label, 'Call recruiter Sarah');
+  assert.equal(addedTask.dueAt, dateStr(1));
+  assert.ok(calls[0].text.includes('Task Added to Tracker'));
+});
+
+test('handleUpdate: /followup schedules next follow-up date', async () => {
+  const calls = [];
+  const impl = async (text, opts) => calls.push({ text, opts });
+  let updatedEntry = null;
+
+  const apps = [{ id: 'app_datacom', company: 'Datacom', role: 'Systems Engineer', status: 'applied' }];
+
+  await handleUpdate(
+    { update_id: 23, message: { chat: { id: 12345 }, text: '/followup Datacom 5d' } },
+    {
+      getApplications: async () => apps,
+      token: 'T',
+      chatId: '12345',
+      sendTelegramImpl: impl,
+      updateApplication: async (id, mutator) => {
+        updatedEntry = mutator({ ...apps[0] });
+        return updatedEntry;
+      },
+    }
+  );
+
+  assert.ok(updatedEntry);
+  assert.equal(updatedEntry.followUpDue, dateStr(5));
+  assert.ok(calls[0].text.includes('Follow-up Scheduled'));
+});
+
+test('handleUpdate: /email logs correspondence into trackingNotes per Rule 6', async () => {
+  const calls = [];
+  const impl = async (text, opts) => calls.push({ text, opts });
+  let savedNotes = null;
+
+  const apps = [{ id: 'app_layer9', company: 'Acme Recruit', role: 'Security Consultant', status: 'applied' }];
+
+  await handleUpdate(
+    {
+      update_id: 24,
+      message: {
+        chat: { id: 12345 },
+        text: '/email Acme Recruit | Sam Taylor <sam@acme-recruit.example.com> | Interview Schedule | Hi Jordan, please join us on Thursday.',
+      },
+    },
+    {
+      getApplications: async () => apps,
+      token: 'T',
+      chatId: '12345',
+      sendTelegramImpl: impl,
+      updateTrackingNotes: async (id, text) => {
+        savedNotes = { id, text };
+        return apps[0];
+      },
+    }
+  );
+
+  assert.ok(savedNotes);
+  assert.equal(savedNotes.id, 'app_layer9');
+  assert.ok(savedNotes.text.includes('Sam Taylor <sam@acme-recruit.example.com>'));
+  assert.ok(savedNotes.text.includes('Interview Schedule'));
+  assert.ok(calls[0].text.includes('Email Correspondence Logged'));
+});
+
+test('handleUpdate: multi-match /role returns disambiguation keyboard', async () => {
+  const calls = [];
+  const impl = async (text, opts) => calls.push({ text, opts });
+
+  const apps = [
+    { id: '1', company: 'Spark NZ', role: 'Cloud Engineer', status: 'applied' },
+    { id: '2', company: 'Spark Digital', role: 'Support Analyst', status: 'interview' },
+  ];
+
+  await handleUpdate(
+    { update_id: 25, message: { chat: { id: 12345 }, text: '/role Spark' } },
+    {
+      getApplications: async () => apps,
+      token: 'T',
+      chatId: '12345',
+      sendTelegramImpl: impl,
+    }
+  );
+
+  assert.ok(calls[0].text.includes('Found 2 matches'));
+  assert.ok(calls[0].opts.replyMarkup.inline_keyboard.length === 2);
+  assert.equal(calls[0].opts.replyMarkup.inline_keyboard[0][0].callback_data, 'view_role:1');
+});
+
+test('handleCallbackQuery: view_role renders role card', async () => {
+  const calls = [];
+  const impl = async (text, opts) => calls.push({ text, opts });
+
+  const apps = [{ id: 'app_1', company: 'Spark', role: 'Engineer', status: 'applied' }];
+
+  await handleCallbackQuery(
+    {
+      id: 'q_1',
+      from: { id: 12345 },
+      data: 'view_role:app_1',
+    },
+    {
+      getApplications: async () => apps,
+      token: 'T',
+      chatId: '12345',
+      sendTelegramImpl: impl,
+    }
+  );
+
+  assert.ok(calls.length > 0);
+  assert.ok(calls[0].text.includes('Spark'));
+  assert.ok(calls[0].text.includes('Engineer'));
+});
+
+test('handleUpdate: keyboard button "📌 Tasks" triggers /today', async () => {
+  const calls = [];
+  const impl = async (text, opts) => calls.push({ text, opts });
+
+  await handleUpdate(
+    { update_id: 26, message: { chat: { id: 12345 }, text: '📌 Tasks' } },
+    {
+      getApplications: async () => [],
+      token: 'T',
+      chatId: '12345',
+      sendTelegramImpl: impl,
+    }
+  );
+
+  assert.ok(calls[0].text.includes("TODAY"));
+});
+
+test('formatGmailFetchSummary: formats user rejection case with divider, quotes, vertical spacing, and summary bullets', () => {
+  const raw = `Found one job-related email: an RBNZ rejection. Let me check the tracker for that entry.
+Already logged as \`status: "rejected"\` — nothing new to update. No need to touch this entry.
+Nothing needed logging or updating. Summary:
+- Matched, nothing new: Reserve Bank of New Zealand — Intern Analyst rejection email received, but the application is already logged as \`rejected\` in the tracker.
+- 9 of 10 emails weren't job-related (bank notices, Amazon delivery updates, marketing).
+No writes made to applications.json or audit-log.jsonl.`;
+
+  const formatted = formatGmailFetchSummary(raw, 10);
+
+  assert.ok(formatted.includes('📨 Gmail Fetch Complete (last 10 emails):'));
+  assert.ok(formatted.includes('───────────────'));
+  assert.ok(formatted.includes('Found one job-related email:'));
+  assert.ok(formatted.includes('1. An RBNZ rejection. Let me check the tracker for that entry.'));
+  assert.ok(formatted.includes('> Already logged as `status: "rejected"` — nothing new to update. No need to touch this entry.'));
+  assert.ok(formatted.includes('> Nothing needed logging or updating.'));
+  assert.ok(formatted.includes('Summary:'));
+  assert.ok(formatted.includes('• Matched, nothing new: Reserve Bank of New Zealand'));
+  assert.ok(formatted.includes('• 9 of 10 emails weren\'t job-related'));
+  assert.ok(formatted.includes('No writes made to applications.json or audit-log.jsonl.'));
+  assert.ok(formatted.includes('(•̀ᴗ•́)و Inbox swept and tracker up to date!'));
+});
+
+test('formatGmailFetchSummary: formats multiple matched emails with numbering and quotes', () => {
+  const raw = `Found 2 job-related emails:
+1. Xero — Graduate Engineer
+Received interview invitation for 28 Sep. Updated status to interview.
+2. Datacom — Junior Developer
+Application acknowledgement. Already logged.
+Summary:
+- Matched & updated: Xero — status set to interview.
+- Matched, nothing new: Datacom — acknowledgement received.
+- 8 of 10 emails weren't job-related.
+Updated applications.json and audit-log.jsonl.`;
+
+  const formatted = formatGmailFetchSummary(raw, 10);
+
+  assert.ok(formatted.includes('1. Xero — Graduate Engineer'));
+  assert.ok(formatted.includes('> Received interview invitation for 28 Sep. Updated status to interview.'));
+  assert.ok(formatted.includes('2. Datacom — Junior Developer'));
+  assert.ok(formatted.includes('> Application acknowledgement. Already logged.'));
+  assert.ok(formatted.includes('Summary:'));
+  assert.ok(formatted.includes('• Matched & updated: Xero'));
+  assert.ok(formatted.includes('• Matched, nothing new: Datacom'));
+});
+
+test('formatGmailFetchSummary: handles clean slate when no job updates found', () => {
+  const formatted = formatGmailFetchSummary('No job updates found in the checked emails.', 10);
+
+  assert.ok(formatted.includes('📨 Gmail Fetch Complete (last 10 emails):'));
+  assert.ok(formatted.includes('───────────────'));
+  assert.ok(formatted.includes('✅ No job updates found in the checked emails.'));
+  assert.ok(formatted.includes('( ◡‿◡ ) All clear! 10 of 10 emails were unrelated'));
+  assert.ok(formatted.includes('No writes made to applications.json or audit-log.jsonl.'));
+  assert.ok(formatted.includes('(•̀ᴗ•́)و Mailbox is clean and tracker is up to date!'));
+});
+
+test('verifyTelegramWebAppData: validates genuine Telegram HMAC signature and user ID', () => {
+  const botToken = '123456:TEST_BOT_TOKEN_XYZ';
+  const chatId = '440907567';
+  const authDate = Math.floor(Date.now() / 1000);
+  const userJson = JSON.stringify({ id: 440907567, first_name: 'Kiran' });
+
+  const params = new URLSearchParams();
+  params.set('auth_date', String(authDate));
+  params.set('query_id', 'TEST_QUERY_123');
+  params.set('user', userJson);
+
+  const items = [];
+  for (const [k, v] of params.entries()) items.push(`${k}=${v}`);
+  items.sort();
+  const dataCheckString = items.join('\n');
+
+  const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
+  const hash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+  params.set('hash', hash);
+
+  const initDataString = params.toString();
+  const result = verifyTelegramWebAppData(initDataString, botToken, chatId);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.user?.id, 440907567);
+  assert.equal(result.user?.first_name, 'Kiran');
+});
+
+test('verifyTelegramWebAppData: rejects tampered data or mismatched hash', () => {
+  const botToken = '123456:TEST_BOT_TOKEN_XYZ';
+  const chatId = '440907567';
+
+  const badData = 'auth_date=1626425533&query_id=ABC&user=%7B%22id%22%3A440907567%7D&hash=invalid_hash_value';
+  const result = verifyTelegramWebAppData(badData, botToken, chatId);
+
+  assert.equal(result.ok, false);
+  assert.ok(result.error?.includes('Invalid HMAC'));
+});
+
+test('verifyTelegramWebAppData: rejects unauthorized Telegram user ID', () => {
+  const botToken = '123456:TEST_BOT_TOKEN_XYZ';
+  const authorizedChatId = '440907567';
+  const authDate = Math.floor(Date.now() / 1000);
+  const attackerUser = JSON.stringify({ id: 999999999, first_name: 'Attacker' });
+
+  const params = new URLSearchParams();
+  params.set('auth_date', String(authDate));
+  params.set('user', attackerUser);
+
+  const items = [];
+  for (const [k, v] of params.entries()) items.push(`${k}=${v}`);
+  items.sort();
+  const dataCheckString = items.join('\n');
+
+  const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
+  const hash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+  params.set('hash', hash);
+
+  const result = verifyTelegramWebAppData(params.toString(), botToken, authorizedChatId);
+
+  assert.equal(result.ok, false);
+  assert.ok(result.error?.includes('Unauthorized Telegram user ID'));
+});
+
+test('buildMainMenuKeyboard: includes WebApp button when webAppUrl is present', () => {
+  const keyboardWithApp = buildMainMenuKeyboard('https://test.trycloudflare.com');
+  assert.ok(keyboardWithApp.keyboard[0][0].web_app);
+  assert.equal(keyboardWithApp.keyboard[0][0].web_app.url, 'https://test.trycloudflare.com/miniapp');
+
+  const keyboardWithoutApp = buildMainMenuKeyboard(null);
+  assert.equal(keyboardWithoutApp.keyboard[0][0].web_app, undefined);
+});
+
+test('handleUpdate: /app offers Mini App button when webAppUrl is present', async () => {
+  const calls = [];
+  const impl = async (text, opts) => calls.push({ text, opts });
+
+  process.env.JOBHQ_HTTPS_URL = 'https://mini.test.domain';
+
+  await handleUpdate(
+    { update_id: 30, message: { chat: { id: 12345 }, text: '/app' } },
+    {
+      getApplications: async () => [],
+      token: 'T',
+      chatId: '12345',
+      sendTelegramImpl: impl,
+    }
+  );
+
+  delete process.env.JOBHQ_HTTPS_URL;
+
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].text.includes('Mini App'));
+  const btn = calls[0].opts.replyMarkup.inline_keyboard[0][0];
+  assert.equal(btn.text, '📱 Launch Telegram Mini App');
+  assert.equal(btn.web_app.url, 'https://mini.test.domain/miniapp');
+});
 
 
+test('handleCallbackQuery: review-question buttons from an unknown id or unauthorised user do nothing', async () => {
+  const { impl, calls } = fakeSender();
+  const base = { token: 'T', chatId: '12345', sendTelegramImpl: impl, execFileImpl: (_c, _a, _o, cb) => cb(null, '{"ok":true}'), fetchImpl: noNetFetch };
+  await handleCallbackQuery({ id: 'q', from: { id: 12345 }, data: 'rq:zzzzzz:y' }, base);
+  await handleCallbackQuery({ id: 'q', from: { id: 999 }, data: 'rq:zzzzzz:y' }, base);
+  await handleCallbackQuery({ id: 'q', from: { id: 12345 }, data: 'rqu:zzzzzz' }, base);
+  assert.equal(calls.length, 0);
+});
+
+test('handleCallbackQuery: review button starts a review via reviewApplication', async () => {
+  const { impl, calls } = fakeSender();
+  let ref = null;
+  await handleCallbackQuery(
+    { id: 'q', from: { id: 12345 }, data: 'review:app_9' },
+    { token: 'T', chatId: '12345', reviewApplication: async (r) => { ref = r; return { company: 'Fujitsu', role: 'Tech' }; }, sendTelegramImpl: impl, fetchImpl: noNetFetch }
+  );
+  assert.equal(ref, 'app_9');
+  assert.ok(calls.some((c) => c.text.includes('Reviewing Fujitsu')));
+});
+
+test('/review: several drafted matches give a choice keyboard; one match starts directly; none says so', async () => {
+  const apps = [
+    { id: 'a1', company: 'Fujitsu', role: 'Tech', status: 'researching', folderPath: 'P/F', cvStatus: 'drafted' },
+    { id: 'a2', company: 'Fujitsu', role: 'Analyst', status: 'researching', folderPath: 'P/F', cvStatus: 'drafted' },
+    { id: 'a3', company: 'Spark', role: 'NOC', status: 'researching', folderPath: 'P/S', cvStatus: 'drafted' },
+  ];
+  const run = async (text) => {
+    const { impl, calls } = fakeSender();
+    const started = [];
+    await handleUpdate({ update_id: 1, message: { chat: { id: 12345 }, text } }, {
+      token: 'T', chatId: '12345', getApplications: async () => apps, sendTelegramImpl: impl, fetchImpl: noNetFetch,
+      reviewApplication: async (id) => { started.push(id); return apps.find((a) => a.id === id); },
+    });
+    return { calls, started };
+  };
+  const multi = await run('/review fujitsu');
+  assert.equal(multi.started.length, 0);
+  assert.deepEqual(multi.calls[0].opts.replyMarkup.inline_keyboard.map((r) => r[0].callback_data), ['review:a1', 'review:a2']);
+  const one = await run('/review spark');
+  assert.deepEqual(one.started, ['a3']);
+  const none = await run('/review nobody');
+  assert.match(none.calls[0].text, /No drafted CV/);
+});
+
+test('interpretVoiceMessage: graceful fallback when apiKey is missing', async () => {
+  const res = await interpretVoiceMessage('fake-path.ogg', { apiKey: '' });
+  assert.equal(res.intent, 'general');
+  assert.match(res.replyText, /GEMINI_API_KEY is not configured/);
+});
+
+test('handleCallbackQuery: get_cl_file sends the cover letter document', async () => {
+  const { impl: sendTelegramImpl } = fakeSender();
+  const docCalls = [];
+  const sendDocImpl = async (filePath, opts) => {
+    docCalls.push({ filePath, opts });
+    return { ok: true };
+  };
+
+  await handleCallbackQuery(
+    { id: 'cb1', from: { id: 12345 }, data: 'get_cl_file:app_spark' },
+    {
+      token: 'T',
+      chatId: '12345',
+      findClFile: async (id) => ({
+        path: '/mock/career/Pending to Apply/Spark/Cover Letter - Spark - Network Engineer.pdf',
+        entry: { company: 'Spark', role: 'Network Engineer' },
+      }),
+      sendTelegramImpl,
+      sendDocImpl,
+      fetchImpl: noNetFetch,
+    }
+  );
+
+  assert.equal(docCalls.length, 1);
+  assert.ok(docCalls[0].filePath.includes('Cover Letter - Spark'));
+  assert.ok(docCalls[0].opts.caption.includes('Cover Letter for Spark — Network Engineer'));
+});
+
+test('/clfile: sends cover letter document when role found', async () => {
+  const apps = [
+    { id: 'app_spark', company: 'Spark', role: 'Network Engineer', status: 'researching' },
+  ];
+  const { impl: sendTelegramImpl } = fakeSender();
+  const docCalls = [];
+  const sendDocImpl = async (filePath, opts) => {
+    docCalls.push({ filePath, opts });
+    return { ok: true };
+  };
+
+  await handleUpdate(
+    { update_id: 1, message: { chat: { id: 12345 }, text: '/clfile spark' } },
+    {
+      token: 'T',
+      chatId: '12345',
+      getApplications: async () => apps,
+      findClFile: async (id) => ({
+        path: '/mock/career/Pending to Apply/Spark/Cover Letter - Spark - Network Engineer.pdf',
+        entry: apps[0],
+      }),
+      sendTelegramImpl,
+      sendDocImpl,
+      fetchImpl: noNetFetch,
+    }
+  );
+
+  assert.equal(docCalls.length, 1);
+  assert.ok(docCalls[0].opts.caption.includes('Spark — Network Engineer'));
+});
+
+test('handleCallbackQuery: fit:<id> sends formatted fit analysis', async () => {
+  const apps = [
+    {
+      id: 'app_test_1',
+      company: 'Datacom',
+      role: 'Cloud Security Analyst',
+      fit: 'strong',
+      analysis: {
+        recommendation: { verdict: 'apply', reasoning: 'AWS and Linux security match.' },
+        score: { overall: 85 },
+      },
+    },
+  ];
+  const { impl: sendTelegramImpl, calls } = fakeSender();
+
+  await handleCallbackQuery(
+    { id: 'cb_fit', from: { id: 12345 }, data: 'fit:app_test_1' },
+    {
+      token: 'T',
+      chatId: '12345',
+      getApplications: async () => apps,
+      sendTelegramImpl,
+      fetchImpl: noNetFetch,
+    }
+  );
+
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].text.includes('FIT ANALYSIS · Datacom'));
+  assert.ok(calls[0].text.includes('85/100'));
+});
+
+test('handleUpdate: /fit <company> sends fit analysis card', async () => {
+  const apps = [
+    {
+      id: 'app_spark_9',
+      company: 'Spark NZ',
+      role: 'SOC Analyst',
+      fit: 'strong',
+      analysis: {
+        recommendation: { verdict: 'apply', reasoning: 'SIEM and networking background.' },
+        score: { overall: 90 },
+      },
+    },
+  ];
+  const { impl: sendTelegramImpl, calls } = fakeSender();
+
+  await handleUpdate(
+    { update_id: 1, message: { chat: { id: 12345 }, text: '/fit spark' } },
+    {
+      token: 'T',
+      chatId: '12345',
+      getApplications: async () => apps,
+      sendTelegramImpl,
+      fetchImpl: noNetFetch,
+    }
+  );
+
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].text.includes('FIT ANALYSIS · Spark NZ'));
+  assert.ok(calls[0].text.includes('SOC Analyst'));
+  assert.ok(calls[0].text.includes('90/100'));
+});
 

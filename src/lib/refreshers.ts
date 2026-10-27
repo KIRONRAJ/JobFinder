@@ -16,7 +16,7 @@ import type { DiagramKey } from '../components/ConceptDiagram';
  *  - `sayThis`  a sentence that is actually speakable out loud in an interview.
  *
  * `sayThis` is deliberately framed as honest-if-thin: several of these are
- * concepts Jordan knows academically rather than from a production role, and
+ * concepts Kironraj knows academically rather than from a production role, and
  * a line that oversells is worse than no line. Where that applies the wording
  * says "conceptually" or "from study" rather than implying work history —
  * same honesty standard the CV and evidence-map already hold to.
@@ -204,7 +204,7 @@ export const REFRESHERS: Record<string, Refresher> = {
   },
   // Deliberately NOT an alias of "Ticketing / service desk". Folding them
   // together made a named-platform gap ("ServiceNow, certified/production
-  // experience") paint the general ticketing term as a gap — telling Jordan
+  // experience") paint the general ticketing term as a gap — telling Kironraj
   // to revise the one part of this area he is genuinely strong in. The queue
   // discipline and the specific product are different claims.
   'ITSM platforms (ServiceNow / Jira)': {

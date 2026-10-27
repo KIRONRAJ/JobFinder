@@ -3,6 +3,7 @@ import { gsap, useGSAP, prefersReducedMotion } from '../lib/gsapSetup';
 import { useFlipPill } from '../lib/useFlipPill';
 import { useGsapPresence } from '../lib/useGsapPresence';
 import { Icon } from './Icons';
+import { useMatcha } from '../lib/useMatcha';
 import { Sidebar, VIEW_META, NavEmoji, type SidebarProps } from './Sidebar';
 import { useDialog } from '../useDialog';
 import type { View } from '../types';
@@ -26,6 +27,7 @@ type Props = Omit<SidebarProps, 'mode'>;
  * appearance/sign-out sections.
  */
 export function MobileNav(props: Props) {
+  const matcha = useMatcha();
   const { view, onSetView } = props;
   const [moreOpen, setMoreOpen] = useState(false);
   const close = () => setMoreOpen(false);
@@ -103,7 +105,7 @@ export function MobileNav(props: Props) {
               {/* Same rule as the rail: emoji only on the active tab, where
                   the label is right underneath it; the drawn icon carries
                   every inactive tab. */}
-              {active ? (
+              {active && !matcha ? (
                 <NavEmoji emoji={emoji} />
               ) : (
                 <IconEl className="h-5 w-5" />

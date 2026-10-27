@@ -16,6 +16,7 @@ export default {
           'Segoe UI',
           'sans-serif',
         ],
+        'display-matcha': ['Matcha Style', 'Outfit Variable', 'Outfit', 'sans-serif'],
         mono: ['JetBrains Mono', 'ui-monospace', 'SF Mono', 'Cascadia Mono', 'monospace'],
       },
       colors: {

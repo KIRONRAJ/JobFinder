@@ -38,7 +38,10 @@ const RISK_META = {
  */
 export function AtsScorePanel({ score }: { score: AtsScore }) {
   const tone = toneFor(score.overall);
-  const risk = RISK_META[score.parsingRisk];
+  // Not every stored score is a full one: the local verify-docs gate writes just { overall, source, at }, and an
+  // older or hand-written score can lack the parsing-risk gate. Show what exists instead of crashing the page.
+  const risk = score.parsingRisk ? RISK_META[score.parsingRisk] : undefined;
+  const dims = DIMENSIONS.filter((d) => typeof score[d.key] === 'number');
 
   return (
     <div className="rounded-2xl border border-line bg-panel-2/50 p-4">
@@ -47,10 +50,19 @@ export function AtsScorePanel({ score }: { score: AtsScore }) {
           <Icon.Target className="h-3.5 w-3.5" />
           ATS match score
         </p>
-        <span className={`flex items-center gap-1.5 text-micro font-medium ${risk.tone}`}>
-          <risk.Icon className="h-3.5 w-3.5" />
-          {risk.label}
-        </span>
+        {risk ? (
+          <span className={`flex items-center gap-1.5 text-micro font-medium ${risk.tone}`}>
+            <risk.Icon className="h-3.5 w-3.5" />
+            {risk.label}
+          </span>
+        ) : (
+          dims.length > 0 && (
+            <span className="flex items-center gap-1.5 text-micro font-medium text-ink-faint">
+              <Icon.Circle className="h-3.5 w-3.5" />
+              Parsing risk not rated
+            </span>
+          )
+        )}
       </div>
 
       <div className="mt-3 flex items-baseline gap-2">
@@ -66,8 +78,14 @@ export function AtsScorePanel({ score }: { score: AtsScore }) {
         />
       </div>
 
+      {dims.length === 0 && (
+        <p className="mt-3 text-micro text-ink-faint">
+          {score.source ? `Scored by ${score.source}.` : 'Overall score only.'} No per-dimension breakdown.
+        </p>
+      )}
+
       <ul className="mt-4 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-        {DIMENSIONS.map((d) => {
+        {dims.map((d) => {
           const value = score[d.key] as number;
           const t = toneFor(value);
           return (

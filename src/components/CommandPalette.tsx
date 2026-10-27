@@ -8,6 +8,7 @@ import { VIEW_META } from './Sidebar';
 import { resolveEvidenceMap } from '../lib/evidenceState';
 import { playSound } from '../lib/sound';
 import type { VisualTheme } from './ThemeSelector';
+import { useMatcha } from '../lib/useMatcha';
 
 interface Props {
   apps: Application[];
@@ -60,6 +61,7 @@ export function CommandPalette({
   onExportCsv,
 }: Props) {
   const [open, setOpen] = useState(false);
+  const matcha = useMatcha();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -105,6 +107,20 @@ export function CommandPalette({
     }
     return jumps;
   }, [apps]);
+
+  // Driven off the same array the sidebar renders, so the palette can
+  // never again drift behind the set of views that actually exist.
+  const goToItems = VIEW_META.filter((v) => v.key !== view).map(({ key, label, icon: IconEl }) => (
+    <Command.Item
+      key={key}
+      value={`Go to ${label}`}
+      onSelect={() => run(() => onSetView(key))}
+      className={itemClass}
+    >
+      <IconEl className="h-4 w-4 text-accent" />
+      Go to {label}
+    </Command.Item>
+  ));
 
   return (
     <Command.Dialog
@@ -199,27 +215,31 @@ export function CommandPalette({
                   Switch to Cyber Obsidian theme (Matrix Neon)
                 </Command.Item>
               )}
+              {visualTheme !== 'matcha' && (
+                <Command.Item
+                  onSelect={() => run(() => onSelectVisualTheme('matcha'))}
+                  className={itemClass}
+                >
+                  <Icon.Sparkle className="h-4 w-4 text-accent" />
+                  Switch to Matcha theme (Lime Ops)
+                </Command.Item>
+              )}
             </>
           ) : (
             <Command.Item onSelect={() => run(onToggleVisualTheme)} className={itemClass}>
               <Icon.Sparkle className="h-4 w-4 text-accent" />
-              Cycle visual theme (Bauhaus / Pulse / Cyber)
+              Cycle visual theme (Bauhaus / Pulse / Cyber / Matcha)
             </Command.Item>
           )}
-          {/* Driven off the same array the sidebar renders, so the palette can
-              never again drift behind the set of views that actually exist. */}
-          {VIEW_META.filter((v) => v.key !== view).map(({ key, label, icon: IconEl }) => (
-            <Command.Item
-              key={key}
-              value={`Go to ${label}`}
-              onSelect={() => run(() => onSetView(key))}
-              className={itemClass}
-            >
-              <IconEl className="h-4 w-4 text-accent" />
-              Go to {label}
-            </Command.Item>
-          ))}
+          {!matcha && goToItems}
         </Command.Group>
+
+        {/* Matcha lists the same "Go to" rows as their own group, like Palette.dc.html. */}
+        {matcha && (
+          <Command.Group heading="Go to" className={groupClass}>
+            {goToItems}
+          </Command.Group>
+        )}
 
         <Command.Group heading="Pipeline Quick Filters" className={groupClass}>
           <Command.Item onSelect={() => run(() => navigate('/?status=applied'))} className={itemClass}>
@@ -236,7 +256,7 @@ export function CommandPalette({
           </Command.Item>
         </Command.Group>
 
-        <Command.Group heading="Applications" className={groupClass}>
+        <Command.Group heading={matcha ? 'Roles' : 'Applications'} className={groupClass}>
           {apps.map((a) => (
             <Command.Item
               key={a.id}
@@ -275,6 +295,17 @@ export function CommandPalette({
           ))}
         </Command.Group>
       </Command.List>
+
+      {matcha && (
+        <div className="mx-palette-foot mx-mono flex items-center gap-5 border-t border-line-soft px-5 py-2.5 text-ink-faint">
+          <span className="flex items-center gap-2">
+            <kbd className="mx-kbd">Esc</kbd> close
+          </span>
+          <span className="flex items-center gap-2">
+            <kbd className="mx-kbd">Enter</kbd> run
+          </span>
+        </div>
+      )}
     </Command.Dialog>
   );
 }

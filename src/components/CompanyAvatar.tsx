@@ -47,6 +47,8 @@ export function CompanyAvatar({
       <img
         src={logo}
         alt={isSot ? 'Summer of Tech listing' : `${source} listing`}
+        loading="lazy"
+        decoding="async"
         className={`shrink-0 rounded-full border border-line/60 ${
           isSot ? 'bg-white p-1 object-contain' : 'object-cover'
         } ${className}`}

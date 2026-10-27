@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   formatMessage,
   sendTelegram,
+  sendTelegramVoice,
   sendTelegramQuiz,
   downloadTelegramFile,
   initOffset,
@@ -10,6 +11,8 @@ import {
   sendEvents,
   startTelegramNotifier,
   splitForTelegram,
+  findCvDocument,
+  findCoverLetterDocument,
 } from './notify-telegram.js';
 import fsPromises from 'node:fs/promises';
 import os from 'node:os';
@@ -351,6 +354,12 @@ test('sendTelegramQuiz: sends a sendPoll body with quiz type and native array op
   assert.equal(body.explanation, 'Math basics');
 });
 
+test('sendTelegramVoice: returns error when missing parameters', async () => {
+  const res = await sendTelegramVoice('', { token: 'T', chatId: '1' });
+  assert.equal(res.ok, false);
+  assert.equal(res.error, 'missing parameters');
+});
+
 test('downloadTelegramFile: resolves the file path then writes the bytes to disk', async () => {
   const dir = await makeTempDir();
   const dest = path.join(dir, 'voice.ogg');
@@ -408,6 +417,94 @@ test('sendEvents: does not send documents for stale events older than 10 minutes
     !seen.some((u) => u.includes('sendDocument')),
     'stale event should not trigger a document upload'
   );
+});
+
+test('findCoverLetterDocument: finds PDF first, then DOCX, then TXT/MD, or null', async () => {
+  const dir = await makeTempDir();
+  const careerDir = path.join(dir, 'career');
+  const appFolder = path.join(careerDir, 'Pending to Apply', 'Acme');
+  await fsPromises.mkdir(appFolder, { recursive: true });
+
+  const dataFile = path.join(dir, 'applications.json');
+  const appData = [
+    {
+      id: 'app_1',
+      matchKey: 'acme-engineer',
+      company: 'Acme',
+      role: 'Engineer',
+      folderPath: 'Pending to Apply/Acme',
+    },
+  ];
+  await fsPromises.writeFile(dataFile, JSON.stringify(appData), 'utf8');
+
+  // No files yet
+  assert.equal(await findCoverLetterDocument('acme-engineer', 'app_1', { careerDir, dataFile }), null);
+
+  // Text file only
+  await fsPromises.writeFile(path.join(appFolder, 'Cover Letter - Acme - Engineer.txt'), 'Letter text', 'utf8');
+  let found = await findCoverLetterDocument('acme-engineer', 'app_1', { careerDir, dataFile });
+  assert.equal(found?.fileName, 'Cover Letter - Acme - Engineer.txt');
+
+  // DOCX file added -> preferred over text
+  await fsPromises.writeFile(path.join(appFolder, 'Cover Letter - Acme - Engineer.docx'), 'docx data', 'utf8');
+  found = await findCoverLetterDocument('acme-engineer', 'app_1', { careerDir, dataFile });
+  assert.equal(found?.fileName, 'Cover Letter - Acme - Engineer.docx');
+
+  // PDF file added -> preferred over DOCX
+  await fsPromises.writeFile(path.join(appFolder, 'Cover Letter - Acme - Engineer.pdf'), 'pdf data', 'utf8');
+  found = await findCoverLetterDocument('acme-engineer', 'app_1', { careerDir, dataFile });
+  assert.equal(found?.fileName, 'Cover Letter - Acme - Engineer.pdf');
+
+  await fsPromises.rm(dir, { recursive: true, force: true });
+});
+
+test('sendEvents: sends both CV and Cover Letter documents for fresh cv-generated event', async () => {
+  const dir = await makeTempDir();
+  const careerDir = path.join(dir, 'career');
+  const appFolder = path.join(careerDir, 'Pending to Apply', 'Spark');
+  await fsPromises.mkdir(appFolder, { recursive: true });
+
+  const dataFile = path.join(dir, 'applications.json');
+  const appData = [
+    {
+      id: 'app_spark',
+      matchKey: 'spark-network-engineer',
+      company: 'Spark',
+      role: 'Network Engineer',
+      folderPath: 'Pending to Apply/Spark',
+    },
+  ];
+  await fsPromises.writeFile(dataFile, JSON.stringify(appData), 'utf8');
+
+  await fsPromises.writeFile(path.join(appFolder, 'CV - Spark - Network Engineer.pdf'), 'PDF CV', 'utf8');
+  await fsPromises.writeFile(path.join(appFolder, 'Cover Letter - Spark - Network Engineer.pdf'), 'PDF CL', 'utf8');
+
+  const docCalls = [];
+  const impl = async (url, init) => {
+    if (String(url).includes('sendDocument')) {
+      docCalls.push({ url, body: init?.body });
+    }
+    return { ok: true, json: async () => ({ ok: true }) };
+  };
+
+  const freshEvent = {
+    action: 'cv-generated',
+    at: Date.now(),
+    entryId: 'app_spark',
+    matchKey: 'spark-network-engineer',
+  };
+
+  await sendEvents([freshEvent], {
+    token: 'T',
+    chatId: '123',
+    fetchImpl: impl,
+    careerDir,
+    dataFile,
+  });
+
+  assert.equal(docCalls.length, 2, 'both CV and Cover Letter should be sent as documents');
+
+  await fsPromises.rm(dir, { recursive: true, force: true });
 });
 
 

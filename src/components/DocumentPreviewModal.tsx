@@ -39,10 +39,12 @@ export function DocumentPreviewModal({
       .getDocuments(appId)
       .then((res) => {
         setFiles(res.files || []);
-        // Pick PDF first if available, else first document
+        // Pick study guide or PDF first if available, else first document
         const initial =
+          res.files.find((f) => f.kind === 'studyGuide') ||
           res.files.find((f) => f.kind === 'cvPdf') ||
           res.files.find((f) => f.ext === 'pdf') ||
+          res.files.find((f) => f.ext === 'html') ||
           res.files[0] ||
           null;
         setSelectedFile(initial);
@@ -128,6 +130,8 @@ export function DocumentPreviewModal({
                 >
                   {f.ext === 'pdf' ? (
                     <Icon.Check className="h-3 w-3" />
+                  ) : f.ext === 'html' || f.kind === 'studyGuide' ? (
+                    <Icon.GradCap className="h-3 w-3 text-amber-500" />
                   ) : (
                     <Icon.Folder className="h-3 w-3" />
                   )}
@@ -140,7 +144,9 @@ export function DocumentPreviewModal({
                           ? 'Cover Letter (PDF)'
                           : f.kind === 'coverDocx'
                             ? 'Cover Letter (Word)'
-                            : f.name}
+                            : f.kind === 'studyGuide'
+                              ? `📖 ${f.name.replace(/-Claude_Study_Guide\.html$/i, ' Study Guide').replace(/\.html$/i, '')}`
+                              : f.name}
                   </span>
                   <span className="text-micro opacity-70">
                     ({Math.round(f.size / 1024)} KB)
@@ -208,7 +214,7 @@ export function DocumentPreviewModal({
                     <Icon.Download className="h-3.5 w-3.5" />
                     Download {selectedFile.ext.toUpperCase()}
                   </a>
-                  {selectedFile.ext === 'pdf' && (
+                  {(selectedFile.ext === 'pdf' || selectedFile.ext === 'html') && (
                     <a
                       href={api.documentInlineUrl(appId, selectedFile.name)}
                       target="_blank"
@@ -222,12 +228,21 @@ export function DocumentPreviewModal({
                 </div>
               </div>
 
-              {/* Viewport: PDF iframe or Word download prompt */}
+              {/* Viewport: PDF iframe, HTML sandboxed guide, or Word download prompt */}
               {selectedFile.ext === 'pdf' ? (
                 <div className="relative flex-1 overflow-hidden rounded-md border-2 border-line bg-white shadow-inner">
                   <iframe
                     title={selectedFile.name}
                     src={`${api.documentInlineUrl(appId, selectedFile.name)}#toolbar=1&navpanes=0`}
+                    className="h-full w-full border-none"
+                  />
+                </div>
+              ) : selectedFile.ext === 'html' ? (
+                <div className="relative flex-1 overflow-hidden rounded-md border-2 border-line bg-white shadow-inner">
+                  <iframe
+                    title={selectedFile.name}
+                    src={api.documentInlineUrl(appId, selectedFile.name)}
+                    sandbox="allow-same-origin allow-scripts allow-popups"
                     className="h-full w-full border-none"
                   />
                 </div>

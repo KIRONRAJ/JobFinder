@@ -14,6 +14,8 @@ export function useModalPresence(show: boolean) {
     (el) => {
       const reduce = prefersReducedMotion();
       const panel = el.querySelector<HTMLElement>('[data-modal-panel]');
+      // Lenis: overlay scrolls natively, page behind stays put.
+      el.setAttribute('data-lenis-prevent', '');
       const tl = gsap.timeline();
       tl.fromTo(el, { autoAlpha: 0 }, { autoAlpha: 1, duration: reduce ? 0 : 0.2, ease: 'power2.out' }, 0);
       if (panel) {

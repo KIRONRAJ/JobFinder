@@ -17,6 +17,7 @@ import type {
   StudyData,
   StudyGuideProgress,
   UpskillReport,
+  Tailoring,
   Employment,
   Fit,
   RoleType,
@@ -51,7 +52,7 @@ export interface OutreachEmailDraft {
 
 export interface AppDocumentFile {
   name: string;
-  kind: 'cvPdf' | 'cvDocx' | 'coverPdf' | 'coverDocx' | 'other';
+  kind: 'cvPdf' | 'cvDocx' | 'coverPdf' | 'coverDocx' | 'studyGuide' | 'other';
   ext: string;
   size: number;
   mtime: number;
@@ -93,10 +94,58 @@ export function setUnauthorizedHandler(handler: (() => void) | null) {
   onUnauthorized = handler;
 }
 
+let telegramInitData: string | null = null;
+export function setTelegramInitData(data: string | null) {
+  telegramInitData = data;
+}
+
+export function getTelegramInitData(): string | null {
+  if (telegramInitData) return telegramInitData;
+  if (typeof window !== 'undefined') {
+    const tg = (window as any).Telegram?.WebApp;
+    if (tg?.initData) {
+      telegramInitData = tg.initData;
+      return tg.initData;
+    }
+    try {
+      const hash = window.location.hash.startsWith('#')
+        ? window.location.hash.slice(1)
+        : window.location.hash;
+      if (hash) {
+        const p = new URLSearchParams(hash);
+        const data = p.get('tgWebAppData');
+        if (data) {
+          telegramInitData = data;
+          return data;
+        }
+      }
+    } catch {}
+    try {
+      if (window.location.search) {
+        const p = new URLSearchParams(window.location.search);
+        const data = p.get('tgWebAppData');
+        if (data) {
+          telegramInitData = data;
+          return data;
+        }
+      }
+    } catch {}
+  }
+  return null;
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...((init?.headers as Record<string, string>) || {}),
+  };
+  const tmaData = getTelegramInitData();
+  if (tmaData) {
+    headers['X-Telegram-Init-Data'] = tmaData;
+  }
   const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json' },
     ...init,
+    headers,
   });
   if (res.status === 401) onUnauthorized?.();
   if (!res.ok) {
@@ -112,6 +161,28 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
     throw new Error(message);
   }
   return res.json() as Promise<T>;
+}
+
+export async function fetchAudioBlob(url: string): Promise<string> {
+  const headers: Record<string, string> = {};
+  const tmaData = getTelegramInitData();
+  if (tmaData) {
+    headers['X-Telegram-Init-Data'] = tmaData;
+  }
+  const res = await fetch(url, { headers });
+  if (res.status === 401) onUnauthorized?.();
+  if (!res.ok) {
+    let message = `Server error (${res.status})`;
+    try {
+      const body = await res.json();
+      if (body?.error) message = body.error;
+    } catch {
+      /* response wasn't JSON — keep the status text */
+    }
+    throw new Error(message);
+  }
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
 }
 
 export const api = {
@@ -191,13 +262,13 @@ export const api = {
    *  /api/claude/stream/:runId, same mechanism as the terminal panel. The
    *  mechanical checks it partly duplicated run every time regardless, in
    *  scripts/verify-docs.py. */
-  requestReview: (id: string, note?: string) =>
+  requestReview: (id: string, note?: string, mode: 'review' | 'fix' = 'review') =>
     request<{ ok: true; runId: string; entry: Application }>(`/api/review-request/${id}`, {
       method: 'POST',
-      body: JSON.stringify({ note: note || '' }),
+      body: JSON.stringify({ note: note || '', mode }),
     }),
 
-  // The Express server may run on a different machine from
+  // The Express server now runs on homeserver (Linux), a different machine from
   // the browser, so it can't launch Explorer on the client PC — that has to
   // happen client-side via a registered `openfolder://` protocol handler
   // (see Required Documents/README or ask Claude for the Windows setup).
@@ -208,6 +279,8 @@ export const api = {
   },
 
   /** Lists available generated documents (.pdf, .docx) for an application (v5.0) */
+  tailoring: (id: string) => request<Tailoring>(`/api/applications/${id}/tailoring`),
+
   getDocuments: (id: string) => request<AppDocumentsResponse>(`/api/applications/${id}/documents`),
 
   /** URL to directly download a document from the server */
@@ -374,7 +447,7 @@ export const api = {
     emails: (id: string) =>
       request<{ items: OutreachEmailDraft[] }>(`/api/outreach/${id}/emails`),
 
-    /** Records that Jordan sent it himself — this app never sends mail. */
+    /** Records that Kironraj sent it himself — this app never sends mail. */
     markSent: (id: string, emailKind: OutreachEmailKind, sentOn?: string) =>
       request<OutreachEntry>(`/api/outreach/${id}/mark-sent`, {
         method: 'POST',
@@ -431,7 +504,13 @@ export const api = {
       drift: { id: string; role: string; company: string; fields: { field: string; local: unknown; notion: unknown }[] }[];
     }>('/api/notion/reconcile', { method: 'POST' }),
 
-  session: () => request<{ authenticated: boolean }>('/api/session'),
+  session: () => request<{ authenticated: boolean; user?: any }>('/api/session'),
+
+  telegramAuth: (initData: string) =>
+    request<{ ok: boolean; user?: any }>('/api/telegram/auth', {
+      method: 'POST',
+      body: JSON.stringify({ initData }),
+    }),
 
   login: (password: string) =>
     request<{ ok: true }>('/api/login', {
@@ -467,4 +546,25 @@ export const api = {
     a.remove();
     URL.revokeObjectURL(url);
   },
+
+  getVoiceSettings: () => request<VoiceSettingsResponse>('/api/voice/settings'),
+  setVoiceSetting: (voiceKey: string) =>
+    request<{ voiceKey: string; voiceId: string; label: string }>('/api/voice/settings', {
+      method: 'POST',
+      body: JSON.stringify({ voiceKey }),
+    }),
 };
+
+export interface VoiceOption {
+  id: string;
+  label: string;
+  description: string;
+  greeting: string;
+}
+
+export interface VoiceSettingsResponse {
+  voiceKey: string;
+  voiceId: string;
+  label: string;
+  availableVoices: Record<string, VoiceOption>;
+}

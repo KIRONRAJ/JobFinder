@@ -20,6 +20,7 @@ interface Props {
   onOpenFolder: () => void;
   onMarkApplied: () => void;
   onPreviewDocs?: () => void;
+  onFollowUp?: () => void;
   onSelectTag?: (tag: string) => void;
   /** True while the local Claude CLI has an active run — lets a queued card
    *  say "Processing…" instead of a generic "Queued…" while it's actually
@@ -51,6 +52,7 @@ function AppCardImpl({
   onOpenFolder,
   onMarkApplied,
   onPreviewDocs,
+  onFollowUp,
   onSelectTag,
   claudeRunning,
 }: Props) {
@@ -58,6 +60,7 @@ function AppCardImpl({
   const queued = isCvActuallyQueued(app, folder);
   // Only offer a review once there's something drafted to review.
   const hasDrafts = isCvActuallyDone(app, folder);
+  const hasStudyGuide = Boolean(folder?.studyGuide);
   const reviewQueued = app.reviewStatus === 'queued';
   const canMarkApplied = app.status === 'researching';
   const isApplied = app.status === 'applied';
@@ -206,7 +209,7 @@ function AppCardImpl({
                     to={`/role/${app.id}`}
                     onClick={(e) => e.stopPropagation()}
                     title={`${overflow} more — open the role page`}
-                    className="chip text-ink-faint hover:text-ink"
+                    className="chip mx-more text-ink-faint hover:text-ink"
                   >
                     +{overflow}
                   </Link>
@@ -230,6 +233,28 @@ function AppCardImpl({
             >
               <Icon.Doc className="h-3.5 w-3.5 text-accent" />
               <span>Preview CV</span>
+            </button>
+          )}
+          {hasStudyGuide && onPreviewDocs && (
+            <button
+              type="button"
+              onClick={stop(onPreviewDocs)}
+              title="Preview role study guide & interview prep notes"
+              className="inline-flex items-center gap-1.5 rounded-full border-2 border-amber-500/40 bg-amber-500/10 px-2.5 py-0.5 text-label font-medium text-amber-700 dark:text-amber-300 transition hover:bg-amber-500/20 shadow-hardXs"
+            >
+              <Icon.GradCap className="h-3.5 w-3.5 text-amber-500" />
+              <span>Study Guide</span>
+            </button>
+          )}
+          {isApplied && onFollowUp && (
+            <button
+              type="button"
+              onClick={stop(onFollowUp)}
+              title="Draft tailored follow-up email"
+              className="inline-flex items-center gap-1.5 rounded-full border-2 border-line bg-panel-2/80 px-2.5 py-0.5 text-label font-medium text-ink transition hover:border-accent hover:text-accent shadow-hardXs"
+            >
+              <Icon.Mail className="h-3.5 w-3.5 text-accent" />
+              <span>Follow Up</span>
             </button>
           )}
           {app.folderPath && (

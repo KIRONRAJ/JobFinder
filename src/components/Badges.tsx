@@ -18,6 +18,7 @@ import {
   type OutreachStatus,
 } from '../types';
 import { resolveEvidenceMap, countByState } from '../lib/evidenceState';
+import { useMatcha } from '../lib/useMatcha';
 
 /** Fixed meaning, never themed — a status colour must always read the same. */
 export const STATUS_DOT: Record<Status, string> = {
@@ -27,15 +28,17 @@ export const STATUS_DOT: Record<Status, string> = {
   offer: 'bg-grass',
   rejected: 'bg-rose',
   withdrawn: 'bg-neutral',
+  skipped: 'bg-neutral',
 };
 
-const STATUS_TEXT: Record<Status, string> = {
+export const STATUS_TEXT: Record<Status, string> = {
   researching: 'Researching',
   applied: 'Applied',
   interview: 'Interview',
   offer: 'Offer',
   rejected: 'Rejected',
   withdrawn: 'Withdrawn',
+  skipped: 'Skipped',
 };
 
 /** A distinct shape per status, so the six are still tellable apart with the
@@ -48,6 +51,7 @@ export const STATUS_ICON: Record<Status, (p: { className?: string }) => JSX.Elem
   offer: Icon.Trophy,
   rejected: Icon.Close,
   withdrawn: Icon.Withdrawn,
+  skipped: Icon.Skipped,
 };
 
 /**
@@ -65,6 +69,7 @@ export const STATUS_EMOJI: Record<Status, string> = {
   offer: '🎉',
   rejected: '🙅',
   withdrawn: '🚪',
+  skipped: '⏭',
 };
 
 /** Statuses that mean something is actively in play get the pulse ring.
@@ -77,13 +82,14 @@ const STATUS_LIVE: Partial<Record<Status, string>> = {
   offer: 'var(--grass)',
 };
 
-const STATUS_TEXT_COLOR: Record<Status, string> = {
+export const STATUS_TEXT_COLOR: Record<Status, string> = {
   researching: 'text-neutral',
   applied: 'text-applied',
   interview: 'text-amber',
   offer: 'text-grass',
   rejected: 'text-rose',
   withdrawn: 'text-neutral',
+  skipped: 'text-neutral',
 };
 
 /* ---------- outreach statuses ---------- */
@@ -104,7 +110,7 @@ export const OUTREACH_STATUS_DOT: Record<OutreachStatus, string> = {
   closed: 'bg-rose',
 };
 
-const OUTREACH_STATUS_TEXT_COLOR: Record<OutreachStatus, string> = {
+export const OUTREACH_STATUS_TEXT_COLOR: Record<OutreachStatus, string> = {
   'to-contact': 'text-neutral',
   emailed: 'text-applied',
   replied: 'text-amber',
@@ -126,7 +132,7 @@ export const OUTREACH_STATUS_ICON: Record<
   closed: Icon.Octagon,
 };
 
-const OUTREACH_STATUS_TEXT: Record<OutreachStatus, string> = Object.fromEntries(
+export const OUTREACH_STATUS_TEXT: Record<OutreachStatus, string> = Object.fromEntries(
   OUTREACH_STATUSES.map((s) => [s.key, s.label])
 ) as Record<OutreachStatus, string>;
 
@@ -199,6 +205,7 @@ const STATUS_WASH: Record<Status, string> = {
   // Same boosted treatment as applied — withdrawn was getting no wash at all,
   // which made it blend into researching (both bg-neutral on the left edge).
   withdrawn: 'bg-gradient-to-r from-neutral/[0.12] dark:from-neutral/[0.18] to-transparent',
+  skipped: 'bg-gradient-to-r from-neutral/[0.12] dark:from-neutral/[0.18] to-transparent',
 };
 
 export const statusWash = (status: Status): string => STATUS_WASH[status];
@@ -226,16 +233,19 @@ export const StatusIcon = ({ status }: { status: Status }) => {
 const STATUS_BADGE: Record<Status, string> = {
   researching: 'bg-neutral/10 border-neutral/30 text-neutral',
   // Deeper fill than the others (20/50 vs 10/30) — same reasoning as
-  // STATUS_WASH above, applied is the one status Jordan scans for most.
+  // STATUS_WASH above, applied is the one status Kironraj scans for most.
   applied: 'bg-applied/20 border-applied/50 text-applied',
   interview: 'bg-amber/10 border-amber/30 text-amber',
   offer: 'bg-grass/10 border-grass/30 text-grass',
   rejected: 'bg-rose/10 border-rose/30 text-rose',
   withdrawn: 'bg-neutral/20 border-neutral/50 text-neutral',
+  skipped: 'bg-neutral/20 border-neutral/50 text-neutral',
 };
 
 export const StatusPill = ({ status }: { status: Status }) => {
   const live = STATUS_LIVE[status];
+  const matcha = useMatcha();
+  const PillIcon = STATUS_ICON[status];
   return (
     <span
       className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1
@@ -245,12 +255,16 @@ export const StatusPill = ({ status }: { status: Status }) => {
       {/* Emoji replaces the drawn glyph in *this* component only — the label
           beside it is always rendered, so nothing here depends on reading the
           picture. `StatusIcon` (drawn) still covers the label-less cases. */}
-      <span aria-hidden="true" className="emoji text-[13.5px] leading-none">
-        {STATUS_EMOJI[status]}
-      </span>
+      {matcha ? (
+        <PillIcon className="h-3.5 w-3.5" />
+      ) : (
+        <span aria-hidden="true" className="emoji text-[13.5px] leading-none">
+          {STATUS_EMOJI[status]}
+        </span>
+      )}
       {STATUS_TEXT[status]}
       {live && (
-        // Sized up from h-1.5 (Jordan couldn't spot the ring at the old
+        // Sized up from h-1.5 (Kironraj couldn't spot the ring at the old
         // size, especially on the applied pill where it now competes with
         // the blink animation on the pill itself).
         <span
@@ -299,7 +313,7 @@ export const AppliedTag = ({ app }: { app: Application }) => {
  *  Suppressed only for closed-out statuses. */
 export const DeadlineTag = ({ app }: { app: Application }) => {
   if (!app.deadline) return null;
-  if (app.status === 'rejected' || app.status === 'withdrawn' || app.status === 'offer') return null;
+  if (app.status === 'rejected' || app.status === 'withdrawn' || app.status === 'skipped' || app.status === 'offer') return null;
   const left = daysUntil(app.deadline);
   if (left === null) return null;
   const urgent = left <= DEADLINE_SOON_DAYS;

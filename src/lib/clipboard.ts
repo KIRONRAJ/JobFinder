@@ -1,6 +1,6 @@
 /**
  * navigator.clipboard requires a secure context (https or localhost) — this
- * app is also reachable over plain http via a private network like Tailscale,
+ * app is also reachable over plain http via Tailscale (100.64.0.1:5177),
  * where navigator.clipboard is undefined and the modern API silently can't
  * run at all. Falls back to the legacy execCommand('copy') textarea trick,
  * which still works over http.

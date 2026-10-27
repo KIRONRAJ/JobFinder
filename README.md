@@ -14,11 +14,17 @@
 
 > 🔒 **Code-Only Showcase Note**: This repository contains the complete source code for the full-stack application and its toolchains. No real personal resumes, employer communications, or credentials are included. A zero-PII demo dataset is bundled (`npm run seed`) so reviewers can immediately run and explore a fully populated dashboard.
 
+**Version 7.3.1** · Node 24 · 226 Node tests · 72 REST routes · synced from the private working copy on 28 Oct 2026 (previous public release: v5.3)
+
+---
+
 ## 🖥️ Project Mockups
 
-| Laptop Mockup | Phone Mockup |
-|---|---|
-| ![image1](image1) | ![image2](image2) |
+Real screenshots of the app running on the bundled demo data (`npm run seed`).
+
+| Laptop: dashboard | Laptop: insights | Phone: dashboard |
+|---|---|---|
+| ![Dashboard on a laptop](docs/mockups/laptop-dashboard.png) | ![Insights on a laptop](docs/mockups/laptop-insights.png) | <img src="docs/mockups/phone-dashboard.png" width="220" alt="Dashboard on a phone"> |
 
 ---
 
@@ -71,11 +77,9 @@
 - Tracks a bidirectional evidence map (`matched` / `gap` / `unsupported`) linking every generated claim directly back to authenticated candidate facts.
 - Includes automated verification scripts (`scripts/verify-docs.py`) validating text-layer ATS keyword presence, 2-page A4 geometry, and word-count tolerances.
 
-### 4. GSAP-Animated Mission Control Dashboard
-- A dedicated home view (`src/components/dashboard/`) built as a grid of focused tiles rather than one dense page:
-  - **Mission Briefing**: Time-of-day greeting, in-flight/applied/interview KPIs, and live server + Notion sync status.
-  - **Funnel & Radar Tiles**: A live conversion funnel, an urgent-deadline radar, and an interview spotlight surfaced from the current pipeline.
-  - **Command Dock & Live Ticker**: Quick-launch actions and a scrolling feed of recent pipeline activity, animated with GSAP and respecting `prefers-reduced-motion`.
+### 4. Calm Home Dashboard & Smooth Motion
+- A single home view with a time-of-day greeting, a **Today** column of what is due, and a pipeline summary, animated with GSAP and Lenis smooth scrolling. Section reveals, parallax and word-by-word titles respect `prefers-reduced-motion` and stay native on touch devices.
+- Four themes (Matcha, Bauhaus, Pulse, Cyber), a mobile bottom tab bar, and a Telegram Mini App.
 
 ### 5. Mobile Command Center (Telegram Bot Integration)
 - 24/7 remote operations via a companion Telegram bot:
@@ -96,6 +100,18 @@
 - **SSRF-safe URL fetching** (`server/safe-url.js`): every caller-supplied URL (job-ad scrapes, chat-based job-link ingest, the job-parse endpoint) is checked against loopback, RFC1918, CGNAT, and link-local ranges — plus the server's own hostname, resolved at runtime — before the app will fetch it.
 - **Spec-correct file downloads** (`server/content-disposition.js`): builds an RFC 6266/5987-compliant `Content-Disposition` header (ASCII fallback + UTF-8 `filename*`), so a generated CV/cover-letter filename containing any non-Latin-1 character never 500s the in-browser preview.
 - **ASCII-safe filename generation**: the tailored-document generator whitelists letters, digits, spaces, and hyphens for every filename it writes, so a company name or role title with punctuation can't produce a file an external upload portal rejects.
+
+### 9. Deterministic CV Engine & Verification Gate
+- `scripts/cv_engine.py` builds a CV spec from the job ad's own wording and a hand-verified evidence bank (`data/cv-evidence.json`, supplied by you), with **no model calls**. A keyword the evidence cannot prove is reported as a gap and never written onto the CV.
+- `scripts/verify-docs.py` gates every generated document: page count, A4 size, text layer, personal data, unsupported claims, real job titles, visa wording, cover-letter length and a local ATS score that mirrors a strict literal-match analyser.
+- An automatic review loop has a second model critique each draft, with up to two regeneration rounds.
+
+### 10. Job Radar
+- A candidate store scored against your target roles and region, fed by job-board searches, employer watchlists and alert emails, with a one-click "fetch new jobs" and Telegram alerts for the ones that fit.
+
+### 11. Agents, Automation & Offline Models
+- The MCP server and the HTTP API are the integration points: any MCP-capable agent can read the pipeline and log or update roles, and every change lands in the append-only audit log, whoever made it.
+- AI runs go through a spawn-a-CLI runner (Claude Code or Gemini, with model fallback) behind a tool deny-list, so long-running agents and local models can work against the same tracker without bypassing validation.
 
 ---
 
@@ -122,7 +138,7 @@
 
 ### 1. Clone & Install
 ```bash
-git clone https://github.com/KIRONRAJ/JobFinder.git
+git clone https://github.com/JORDAN/JobFinder.git
 cd JobFinder
 npm install
 ```
@@ -165,4 +181,4 @@ The built-in **Insights** engine tracks:
 ## 📄 License & Attribution
 
 This project is open-source under the [MIT License](LICENSE).  
-Designed and engineered by **Jordan Smith**.
+Designed and engineered by **Kironraj Odatt Peringode**.

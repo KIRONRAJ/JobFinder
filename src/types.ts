@@ -4,7 +4,8 @@ export type Status =
   | 'interview'
   | 'offer'
   | 'rejected'
-  | 'withdrawn';
+  | 'withdrawn'
+  | 'skipped';
 
 export type Fit = 'strong' | 'good' | 'stretch';
 export type Employment = 'job' | 'internship';
@@ -153,6 +154,8 @@ export interface AtsScore {
   overall: number;
   /** Plain English: the single biggest thing holding the score back. */
   explanation: string;
+  /** Set when the score came from the local verify-docs gate rather than a full analysis; such a score has only `overall`. */
+  source?: string;
 }
 
 /** The structured shape a learning task sometimes takes — see the comment on
@@ -246,6 +249,8 @@ export interface Application {
   fit: Fit;
   employment?: Employment;
   link?: string;
+  /** Extra labelled links shown as buttons on the role page (e.g. study guides in the role folder). */
+  links?: { label: string; url: string }[];
   cover?: CoverStatus;
   cvStatus?: CvStatus;
   /** Mirrors cvStatus's queued/ready pattern, for the on-demand deep-analysis
@@ -260,11 +265,11 @@ export interface Application {
   date?: string;
   folderPath?: string;
   notes?: string;
-  /** Corrections Jordan gives the fit analysis in his own words — an
+  /** Corrections Kironraj gives the fit analysis in his own words — an
    *  eligibility clause Claude misread, a skill or a piece of experience the
    *  CV doesn't spell out. Distinct from `notes` above, which is a scratch
    *  field: these are *authoritative*. They ride along with every cv_request
-   *  and analysis_request, and Claude must treat them as fact about Jordan
+   *  and analysis_request, and Claude must treat them as fact about Kironraj
    *  rather than re-deriving a contradicting verdict from the ad alone. */
   userFacts?: string;
   created?: number;
@@ -272,11 +277,18 @@ export interface Application {
   staleNotifiedAt?: number;
   statusHistory?: { status: Status; at: number }[];
 
+  /** The ad body the CV engine tailors against. */
+  jobText?: string;
+  /** 'summary' blocks CV generation until the verbatim ad is pasted in. */
+  jobTextKind?: 'verbatim' | 'summary';
+  /** Set once Job Ad.txt / Job Ad.pdf were archived into the role folder. */
+  adSnapshotAt?: number;
+
   /** Closing date for the ad, when it publishes one. */
   deadline?: string;
   deadlineNotifiedAt?: number;
 
-  /** Things Jordan has to do by a point in time — assessments, take-home
+  /** Things Kironraj has to do by a point in time — assessments, take-home
    *  tasks. Distinct from `deadline` above; see ApplicationTask. */
   tasks?: ApplicationTask[];
 
@@ -374,7 +386,7 @@ export type OutreachEmailStatus = '' | 'queued' | 'drafted' | 'sent';
 
 export interface OutreachEmail {
   kind: OutreachEmailKind;
-  /** YYYY-MM-DD — the day *Jordan* sent it. Nothing in this app sends mail. */
+  /** YYYY-MM-DD — the day *Kironraj* sent it. Nothing in this app sends mail. */
   sentOn: string;
   /** Relative to "Career and Job", e.g. Outreach/Recruiters/Absolute IT/Intro Email - Absolute IT.md */
   draftPath?: string;
@@ -466,7 +478,7 @@ export type OutreachView = 'companies' | 'recruiters';
 // 'list' instead (drag-to-status stays, it just isn't a separate destination
 // any more). 'analytics' / 'fit' / 'evidence' / 'market' / 'audit' collapsed
 // into 'insights', a single tabbed page — see routes/Insights.tsx.
-export type View = 'list' | 'agenda' | 'study' | 'insights' | 'settings' | OutreachView;
+export type View = 'list' | 'agenda' | 'study' | 'insights' | 'radar' | 'settings' | OutreachView;
 
 export function isOutreachView(v: View): v is OutreachView {
   return v === 'companies' || v === 'recruiters';
@@ -616,7 +628,7 @@ export function studyGuideComplete(p?: StudyGuideProgress): boolean {
 }
 
 /**
- * A time-bound thing Jordan personally has to DO — an online assessment, a
+ * A time-bound thing Kironraj personally has to DO — an online assessment, a
  * take-home task, a form to return. Deliberately not the same as an entry's
  * `deadline`, which is the ad's closing date: once you've applied, the closing
  * date is no longer actionable, and treating the two as one thing is what made
@@ -785,6 +797,7 @@ export interface FolderStatus {
   exists: boolean;
   cv: boolean;
   coverLetter: boolean;
+  studyGuide?: boolean;
 }
 
 export const STATUSES: { key: Status; label: string }[] = [
@@ -794,6 +807,7 @@ export const STATUSES: { key: Status; label: string }[] = [
   { key: 'offer', label: 'Offer' },
   { key: 'rejected', label: 'Rejected' },
   { key: 'withdrawn', label: 'Withdrawn' },
+  { key: 'skipped', label: 'Skipped' },
 ];
 
 export const ROLE_TYPES: RoleType[] = [
@@ -925,4 +939,27 @@ export function outreachFollowUpDue(e: OutreachEntry): string {
 /** How many follow-up nudges have gone out with no reply back. */
 export function outreachNudgeCount(e: OutreachEntry): number {
   return (e.emails ?? []).filter((m) => m.kind === 'follow-up').length;
+}
+
+export type TailoringTermState = 'proven' | 'claimed' | 'unlockable' | 'gap';
+
+export interface TailoringBullet {
+  text: string;
+  terms: string[];
+  matched: string[];
+  chosen: boolean;
+}
+
+export interface Tailoring {
+  keywords: {
+    term: string;
+    surface: string;
+    kind: 'hard' | 'soft';
+    priority: 'required' | 'preferred';
+    jdCount: number;
+    state: TailoringTermState;
+    note?: string | null;
+  }[];
+  roles: { title: string; company: string; lead: boolean; bullets: TailoringBullet[] }[];
+  projects: { title: string; chosen: boolean; bullets: TailoringBullet[] }[];
 }

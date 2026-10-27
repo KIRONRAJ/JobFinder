@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Icon } from './Icons';
 import { playSound } from '../lib/sound';
 
-export type VisualTheme = 'bauhaus' | 'pulse' | 'cyber';
+export type VisualTheme = 'bauhaus' | 'pulse' | 'cyber' | 'matcha';
 
 interface Props {
   theme: VisualTheme;
@@ -44,6 +44,14 @@ const THEME_OPTIONS: ThemeOption[] = [
     tagline: 'Matrix • Neon Halos',
     accentColor: '#10b981',
     icon: Icon.Terminal,
+  },
+  {
+    key: 'matcha',
+    label: 'Matcha',
+    shortLabel: 'Matcha',
+    tagline: 'Calm • Lime Ops',
+    accentColor: '#c6f04d',
+    icon: Icon.Sparkle,
   },
 ];
 
@@ -145,7 +153,7 @@ export function ThemeSelector({
         >
           <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-ink-faint border-b border-line-soft/60 mb-1 flex items-center justify-between">
             <span>Atmosphere</span>
-            <span className="text-[9px] font-mono lowercase opacity-70">3 themes</span>
+            <span className="text-[9px] font-mono lowercase opacity-70">{THEME_OPTIONS.length} themes</span>
           </div>
 
           <div className="space-y-0.5">

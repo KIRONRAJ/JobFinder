@@ -1,10 +1,14 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { gsap, useGSAP, prefersReducedMotion } from '../lib/gsapSetup';
 import { Icon } from './Icons';
 import { OutreachCard } from './OutreachCard';
 import { OutreachModal } from './OutreachModal';
 import { GenericDocsPanel } from './GenericDocsPanel';
 import { TabStrip } from './TabStrip';
+import { MatchaPageHead } from './matcha/MatchaPageHead';
+import { MatchaOutreachCard } from './matcha/MatchaOutreachCard';
+import { ShowMoreControl } from './ShowMoreControl';
+import { useMatcha } from '../lib/useMatcha';
 import { OUTREACH_STATUS_ICON } from './Badges';
 import { api } from '../api';
 import {
@@ -27,8 +31,14 @@ interface Props {
   toast: (text: string, tone?: 'info' | 'error') => void;
 }
 
-const FILTERS: { key: '' | OutreachStatus; label: string }[] = [
+/** Pending is a virtual tab: a drafted (or queued) email that hasn't been sent yet. */
+type StatusFilter = '' | 'pending' | OutreachStatus;
+const OUTREACH_LIMIT = 6;
+const isPending = (e: OutreachEntry) => e.emailStatus === 'drafted' || e.emailStatus === 'queued';
+
+const FILTERS: { key: StatusFilter; label: string }[] = [
   { key: '', label: 'All' },
+  { key: 'pending', label: 'Pending' },
   ...OUTREACH_STATUSES.map((s) => ({ key: s.key, label: s.label })),
 ];
 
@@ -42,8 +52,15 @@ export function OutreachView({
   toast,
 }: Props) {
   const meta = KIND_META[kind];
-  const [statusF, setStatusF] = useState<'' | OutreachStatus>('');
+  const matcha = useMatcha();
+  const [statusF, setStatusF] = useState<StatusFilter>('');
   const [editing, setEditing] = useState<OutreachEntry | null>(null);
+  // Off keeps the stored order. Otherwise newest- or oldest-first by the last
+  // time anything happened on the row (last emailed, else last edited, else created).
+  const [dateSort, setDateSort] = useState<'' | 'desc' | 'asc'>('');
+  // Matcha's card grid shows the first 6 and reveals more (same pattern as the applications list). Resets when the list changes.
+  const [limit, setLimit] = useState(OUTREACH_LIMIT);
+  useEffect(() => setLimit(OUTREACH_LIMIT), [statusF, dateSort, kind]);
 
   const mine = useMemo(() => entries.filter((e) => e.kind === kind), [entries, kind]);
 
@@ -59,11 +76,27 @@ export function OutreachView({
 
   const counts = useMemo(() => {
     const m = new Map<string, number>();
-    for (const e of mine) m.set(e.status, (m.get(e.status) ?? 0) + 1);
+    for (const e of mine) {
+      m.set(e.status, (m.get(e.status) ?? 0) + 1);
+      if (isPending(e)) m.set('pending', (m.get('pending') ?? 0) + 1);
+    }
     return m;
   }, [mine]);
 
-  const shown = statusF ? mine.filter((e) => e.status === statusF) : mine;
+  const filtered = !statusF
+    ? mine
+    : statusF === 'pending'
+      ? mine.filter(isPending)
+      : mine.filter((e) => e.status === statusF);
+  const shown = useMemo(() => {
+    if (!dateSort) return filtered;
+    const when = (e: OutreachEntry) => {
+      const emailed = e.lastEmailedOn ? Date.parse(e.lastEmailedOn) : NaN;
+      return Number.isFinite(emailed) ? emailed : (e.updated ?? e.created ?? 0);
+    };
+    const dir = dateSort === 'desc' ? -1 : 1;
+    return [...filtered].sort((a, b) => dir * (when(a) - when(b)));
+  }, [filtered, dateSort]);
 
   const save = async (data: Partial<OutreachEntry>) => {
     try {
@@ -153,21 +186,34 @@ export function OutreachView({
 
   return (
     <div className="space-y-5">
+      {matcha && <MatchaPageHead eyebrow="Outreach" title={meta.title} />}
       {/* Same pack on both sections, by design — see GenericDocsPanel. */}
       <GenericDocsPanel kind={kind} toast={toast} />
 
       {mine.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
         <TabStrip
           items={FILTERS.map((f) => ({
             key: f.key || 'all',
             label: f.label,
             count: f.key === '' ? mine.length : (counts.get(f.key) ?? 0),
-            icon: f.key === '' ? Icon.Grid : OUTREACH_STATUS_ICON[f.key],
+            icon:
+              f.key === '' ? Icon.Grid : f.key === 'pending' ? Icon.Edit : OUTREACH_STATUS_ICON[f.key],
           })).filter((f) => f.key === 'all' || f.count > 0)}
           active={statusF || 'all'}
-          onPick={(key) => setStatusF(key === 'all' ? '' : (key as OutreachStatus))}
+          onPick={(key) => setStatusF(key === 'all' ? '' : (key as StatusFilter))}
           ariaLabel={`Filter ${meta.plural} by status`}
         />
+        <button
+          onClick={() => setDateSort((s) => (s === '' ? 'desc' : s === 'desc' ? 'asc' : ''))}
+          className={`btn-quiet text-meta ${dateSort ? 'text-accent' : ''}`}
+          title="Sorts by last emailed, else last edited"
+          aria-pressed={dateSort !== ''}
+        >
+          <Icon.Clock className="h-3.5 w-3.5" />
+          {dateSort === 'desc' ? 'Date: newest first' : dateSort === 'asc' ? 'Date: oldest first' : 'Sort by date'}
+        </button>
+        </div>
       )}
 
       {mine.length === 0 ? (
@@ -192,24 +238,38 @@ export function OutreachView({
           </p>
         </div>
       ) : (
-        <div ref={listRef} className="space-y-3">
-          {shown.map((entry) => (
-            <div key={entry.id} className="outreach-row">
-              <OutreachCard
-                entry={entry}
-                linkedApplications={linkedCount(entry.name)}
-                onEdit={setEditing}
-                onStatusChange={changeStatus}
-                onQueueEmail={queueEmail}
-                onMarkSent={markSent}
-                onOpenFolder={openFolder}
-              />
-            </div>
-          ))}
+        <>
+        <div ref={listRef} className={matcha ? 'mx-ogrid grid gap-5 sm:grid-cols-2 xl:grid-cols-3' : 'space-y-3'}>
+          {(matcha ? shown.slice(0, limit) : shown).map((entry) => {
+            const Card = matcha ? MatchaOutreachCard : OutreachCard;
+            return (
+              <div key={entry.id} className="outreach-row">
+                <Card
+                  entry={entry}
+                  linkedApplications={linkedCount(entry.name)}
+                  onEdit={setEditing}
+                  onStatusChange={changeStatus}
+                  onQueueEmail={queueEmail}
+                  onMarkSent={markSent}
+                  onOpenFolder={openFolder}
+                />
+              </div>
+            );
+          })}
         </div>
+        {matcha && (
+          <ShowMoreControl
+            total={shown.length}
+            visible={limit}
+            onShowMore={() => setLimit((v) => v + OUTREACH_LIMIT)}
+            onShowAll={() => setLimit(shown.length)}
+            onShowFewer={() => setLimit(OUTREACH_LIMIT)}
+          />
+        )}
+        </>
       )}
 
-      <p className="flex items-center gap-1.5 px-1 text-label text-ink-faint">
+      <p className="mx-notice flex items-center gap-1.5 px-1 text-label text-ink-faint">
         <Icon.Shield className="h-3 w-3" />
         Emails are drafted to disk and shown here to copy — this app never sends mail.
       </p>

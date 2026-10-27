@@ -1,0 +1,473 @@
+{
+  "terms": [
+    {
+      "term": "administration",
+      "kind": "hard"
+    },
+    {
+      "term": "computer literacy",
+      "kind": "hard"
+    },
+    {
+      "term": "incident management",
+      "kind": "hard"
+    },
+    {
+      "term": "microsoft office suite",
+      "kind": "hard",
+      "variants": [
+        "microsoft office",
+        "ms office"
+      ],
+      "display": "Microsoft Office Suite"
+    },
+    {
+      "term": "operational coordination",
+      "kind": "hard"
+    },
+    {
+      "term": "ai-enabled tools",
+      "kind": "hard",
+      "variants": [
+        "ai tools"
+      ],
+      "display": "AI-enabled tools"
+    },
+    {
+      "term": "automation",
+      "kind": "hard"
+    },
+    {
+      "term": "collaboration",
+      "kind": "hard",
+      "variants": [
+        "collaborate",
+        "cross-functional teams"
+      ],
+      "display": "Collaboration"
+    },
+    {
+      "term": "digital fluency",
+      "kind": "hard"
+    },
+    {
+      "term": "microsoft 365",
+      "kind": "hard",
+      "variants": [
+        "m365",
+        "office 365"
+      ],
+      "display": "Microsoft 365"
+    },
+    {
+      "term": "systems thinking",
+      "kind": "hard"
+    },
+    {
+      "term": "information and systems",
+      "kind": "hard"
+    },
+    {
+      "term": "ticketing",
+      "kind": "hard",
+      "variants": [
+        "ticketing system"
+      ]
+    },
+    {
+      "term": "service desk",
+      "kind": "hard",
+      "variants": [
+        "help desk",
+        "helpdesk"
+      ]
+    },
+    {
+      "term": "sla",
+      "kind": "hard",
+      "variants": [
+        "slas",
+        "service level agreements"
+      ],
+      "display": "SLA"
+    },
+    {
+      "term": "escalation",
+      "kind": "hard",
+      "variants": [
+        "escalations"
+      ]
+    },
+    {
+      "term": "troubleshooting",
+      "kind": "hard"
+    },
+    {
+      "term": "remote support",
+      "kind": "hard"
+    },
+    {
+      "term": "linux",
+      "kind": "hard",
+      "display": "Linux"
+    },
+    {
+      "term": "windows server",
+      "kind": "hard",
+      "display": "Windows Server"
+    },
+    {
+      "term": "networking",
+      "kind": "hard",
+      "variants": [
+        "network operations"
+      ]
+    },
+    {
+      "term": "network monitoring",
+      "kind": "hard"
+    },
+    {
+      "term": "dns",
+      "kind": "hard",
+      "display": "DNS"
+    },
+    {
+      "term": "documentation",
+      "kind": "hard"
+    },
+    {
+      "term": "customer service",
+      "kind": "hard"
+    },
+    {
+      "term": "stakeholder management",
+      "kind": "hard",
+      "variants": [
+        "stakeholder engagement"
+      ]
+    },
+    {
+      "term": "html",
+      "kind": "hard",
+      "display": "HTML"
+    },
+    {
+      "term": "javascript",
+      "kind": "hard",
+      "display": "JavaScript"
+    },
+    {
+      "term": "python",
+      "kind": "hard",
+      "display": "Python"
+    },
+    {
+      "term": "cyber security",
+      "kind": "hard",
+      "variants": [
+        "cybersecurity"
+      ]
+    },
+    {
+      "term": "iot",
+      "kind": "hard",
+      "display": "IoT"
+    },
+    {
+      "term": "servicenow",
+      "kind": "hard",
+      "display": "ServiceNow"
+    },
+    {
+      "term": "zendesk",
+      "kind": "hard",
+      "display": "Zendesk"
+    },
+    {
+      "term": "jira",
+      "kind": "hard",
+      "display": "Jira"
+    },
+    {
+      "term": "salesforce",
+      "kind": "hard",
+      "display": "Salesforce"
+    },
+    {
+      "term": "kraken",
+      "kind": "hard",
+      "display": "Kraken"
+    },
+    {
+      "term": "cims",
+      "kind": "hard",
+      "variants": [
+        "coordinated incident management system"
+      ],
+      "display": "CIMS"
+    },
+    {
+      "term": "accuracy",
+      "kind": "soft"
+    },
+    {
+      "term": "attention to detail",
+      "kind": "soft"
+    },
+    {
+      "term": "communication skills",
+      "kind": "soft"
+    },
+    {
+      "term": "written communication",
+      "kind": "soft"
+    },
+    {
+      "term": "verbal",
+      "kind": "soft",
+      "display": "Verbal communication"
+    },
+    {
+      "term": "empathy",
+      "kind": "soft"
+    },
+    {
+      "term": "listening",
+      "kind": "soft",
+      "display": "Active listening"
+    },
+    {
+      "term": "outstanding customer service",
+      "kind": "soft"
+    },
+    {
+      "term": "time management",
+      "kind": "soft"
+    },
+    {
+      "term": "discretion",
+      "kind": "soft"
+    },
+    {
+      "term": "facilitation skills",
+      "kind": "soft",
+      "variants": [
+        "facilitation"
+      ],
+      "needsEvidence": true
+    },
+    {
+      "term": "judgement",
+      "kind": "soft",
+      "variants": [
+        "judgment"
+      ]
+    },
+    {
+      "term": "organisational and systems",
+      "kind": "soft",
+      "needsEvidence": true
+    },
+    {
+      "term": "teamwork",
+      "kind": "soft"
+    },
+    {
+      "term": "problem-solving",
+      "kind": "soft",
+      "variants": [
+        "problem solving"
+      ]
+    },
+    {
+      "term": "powershell",
+      "kind": "hard",
+      "display": "PowerShell"
+    },
+    {
+      "term": "engineering",
+      "kind": "hard",
+      "variants": [
+        "engineering skills"
+      ],
+      "display": "Engineering (B.Tech, Electronics and Communication)"
+    },
+    {
+      "term": "investigation",
+      "kind": "hard",
+      "variants": [
+        "investigations",
+        "investigate"
+      ],
+      "display": "Fault investigation"
+    },
+    {
+      "term": "finite element",
+      "kind": "hard",
+      "variants": [
+        "finite element modelling",
+        "finite element models",
+        "finite element analysis",
+        "fea"
+      ],
+      "display": "Finite element modelling"
+    },
+    {
+      "term": "fitness-for-service",
+      "kind": "hard",
+      "variants": [
+        "fitness for service",
+        "remaining-life"
+      ],
+      "display": "Fitness-for-service assessment"
+    },
+    {
+      "term": "codes and standards",
+      "kind": "hard",
+      "variants": [
+        "codes and engineering standards",
+        "engineering standards"
+      ],
+      "display": "Engineering codes and standards"
+    },
+    {
+      "term": "health, safety and environment",
+      "kind": "hard",
+      "variants": [
+        "hs&e",
+        "hse",
+        "health and safety"
+      ],
+      "display": "Health, Safety and Environment (HS&E)"
+    },
+    {
+      "term": "fluent english",
+      "kind": "soft",
+      "variants": [
+        "oral and written english"
+      ],
+      "display": "Fluent written and spoken English"
+    },
+    {
+      "term": "claude code",
+      "kind": "hard",
+      "display": "Claude Code"
+    },
+    {
+      "term": "ai coding agents",
+      "kind": "hard",
+      "variants": [
+        "ai development agents",
+        "coding agents"
+      ],
+      "display": "AI coding agents"
+    },
+    {
+      "term": "llm apis",
+      "kind": "hard",
+      "variants": [
+        "llm api"
+      ],
+      "display": "LLM APIs"
+    },
+    {
+      "term": "ai agents",
+      "kind": "hard",
+      "display": "AI agents"
+    },
+    {
+      "term": "openai codex",
+      "kind": "hard",
+      "variants": [
+        "codex"
+      ],
+      "display": "OpenAI Codex"
+    },
+    {
+      "term": "rag",
+      "kind": "hard",
+      "display": "RAG"
+    },
+    {
+      "term": "git",
+      "kind": "hard",
+      "display": "Git"
+    },
+    {
+      "term": "testing",
+      "kind": "hard"
+    },
+    {
+      "term": "deployment",
+      "kind": "hard",
+      "variants": [
+        "deploying",
+        "deploy"
+      ]
+    },
+    {
+      "term": "authentication",
+      "kind": "hard"
+    },
+    {
+      "term": "api integration",
+      "kind": "hard",
+      "variants": [
+        "apis",
+        "integrations",
+        "integrating"
+      ],
+      "display": "API integration"
+    },
+    {
+      "term": "webhooks",
+      "kind": "hard"
+    },
+    {
+      "term": "document processing",
+      "kind": "hard"
+    },
+    {
+      "term": "workflow automation",
+      "kind": "hard",
+      "variants": [
+        "business workflow automation"
+      ]
+    },
+    {
+      "term": "mssql",
+      "kind": "hard",
+      "display": "MSSQL"
+    },
+    {
+      "term": "c#",
+      "kind": "hard",
+      "variants": [
+        ".net",
+        "asp.net core"
+      ],
+      "display": "C#"
+    },
+    {
+      "term": "azure",
+      "kind": "hard",
+      "display": "Azure"
+    },
+    {
+      "term": "power automate",
+      "kind": "hard",
+      "display": "Power Automate"
+    },
+    {
+      "term": "copilot studio",
+      "kind": "hard",
+      "display": "Copilot Studio"
+    },
+    {
+      "term": "microsoft graph",
+      "kind": "hard",
+      "display": "Microsoft Graph"
+    }
+  ]
+}

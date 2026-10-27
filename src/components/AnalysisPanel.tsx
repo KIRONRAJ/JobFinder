@@ -62,7 +62,7 @@ function LearningTaskItem({ task }: { task: LearningTask }) {
   );
 }
 
-export function AnalysisPanel({ analysis }: { analysis: Analysis }) {
+export function AnalysisPanel({ analysis, hideScore = false }: { analysis: Analysis; hideScore?: boolean }) {
   // An analysis missing `ats`/`gap` entirely is the same failure one level up.
   const ats = analysis.ats ?? ({} as Analysis['ats']);
   const gap = analysis.gap ?? ({} as Analysis['gap']);
@@ -74,7 +74,7 @@ export function AnalysisPanel({ analysis }: { analysis: Analysis }) {
 
   return (
     <div className="space-y-5">
-      {analysis.score && <AtsScorePanel score={analysis.score} />}
+      {analysis.score && !hideScore && <AtsScorePanel score={analysis.score} />}
 
       <div className="space-y-4">
         <p className="text-micro uppercase tracking-wide text-ink-faint">ATS keywords</p>

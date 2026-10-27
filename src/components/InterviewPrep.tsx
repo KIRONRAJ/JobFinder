@@ -3,7 +3,7 @@ import type { Application, RoleType } from '../types';
 
 /**
  * Shown only once a role reaches Interview. The talking points are drawn from
- * Jordan's real, confirmed background (Candidate Key Facts.md) — nothing
+ * Kironraj's real, confirmed background (Candidate Key Facts.md) — nothing
  * here is invented, and anything role-specific he adds lives in his notes.
  */
 const TALKING_POINTS = [

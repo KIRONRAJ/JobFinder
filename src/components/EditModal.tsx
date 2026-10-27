@@ -410,7 +410,7 @@ export function EditModal({ open, entry, onClose, onSave, onDelete }: Props) {
                   </div>
                   <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-micro text-ink-faint">
                     <span>Quick tags:</span>
-                    {['SOT', 'Internship', 'Graduate', 'Cyber', 'Govt'].map((sug) => {
+                    {['SOT', 'Reapplied', 'Internship', 'Graduate', 'Cyber', 'Govt'].map((sug) => {
                       const has = (form.tags ?? []).includes(sug);
                       if (has) return null;
                       return (
@@ -461,7 +461,7 @@ export function EditModal({ open, entry, onClose, onSave, onDelete }: Props) {
                 <div>
                   <label className="field-label" htmlFor="f-cphone">Contact phone</label>
                   <input id="f-cphone" type="tel" className="field-input" value={form.contactPhone ?? ''}
-                    onChange={(e) => set('contactPhone', e.target.value)} placeholder="e.g. 021 190 8597" />
+                    onChange={(e) => set('contactPhone', e.target.value)} placeholder="e.g. 021 555 0123" />
                 </div>
                 <div>
                   <label className="field-label" htmlFor="f-next">Next action</label>
