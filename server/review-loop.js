@@ -171,7 +171,7 @@ async function docxText(file) {
 export async function readDocs(entry) {
   const dir = path.join(CAREER_DIR, entry.folderPath);
   const files = await fsPromises.readdir(dir);
-  // File names follow App/scripts/docnames.py: "CV - Kironraj - <Company>[ - <role tag>].docx".
+  // File names follow App/scripts/docnames.py: "CV - Jordan Smith - <Company>[ - <role tag>].docx".
   // Older files carry the full role. Prefer a role match, then a company match.
   const roleTag = String(entry.role || '').replace(/\([^)]*\)/g, ' ').split(/\s[-|:/]\s|[,;|:]/)[0].replace(/[^A-Za-z0-9 ]/g, ' ').trim().split(/\s+/).slice(0, 4).join(' ').toLowerCase();
   const pick = (prefix) => {
